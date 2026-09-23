@@ -77,6 +77,14 @@ GID больше безопасного диапазона JavaScript Number. Н
 
 `nodes_roles.csv`, `clusters.csv` и `top_nodes.csv` — обязательные отдельные результаты Python. Их схемы не меняются ради интерфейса. Браузер экспортирует текущий отфильтрованный список с колонками `rank,gid,role,priority_score,why`.
 
+Приёмка готовых файлов на стороне Python:
+
+```powershell
+.\.venv\Scripts\python.exe -m moneygraph.verify --data data --out artifacts
+```
+
+Сверяет исходные Parquet, все операции/связи/узлы, три CSV, `metrics.json`, `run.json` и снимок. Согласованный экспорт возвращает JSON `status: "ok"` и exit 0; ошибка — stderr и exit 1. Проверка не меняет файлы и не оценивает истинность гипотез ролей. При нестандартной конфигурации укажите тот же `--config`, что использовали при расчёте.
+
 ```sh
 node --test frontend/data.test.cjs frontend/backend.test.cjs
 ```

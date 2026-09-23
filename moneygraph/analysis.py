@@ -12,17 +12,27 @@ ROLE_LABELS = {'consolidator': 'Консолидация', 'transit': 'Тран�
                'terminal': 'Конечный получатель?', 'coordinator': 'Координация?', 'peripheral': 'Периферия'}
 
 
+def _finite_number(value):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def read_config(path=None):
     default_path = Path(__file__).resolve().parent.parent / 'config' / 'roles.json'
     cfg = json.loads(Path(path or default_path).read_text(encoding='utf-8'))
     expected = json.loads(default_path.read_text(encoding='utf-8'))
+    if not isinstance(cfg, dict):
+        raise ValueError('Config должен быть JSON-объектом')
     if set(cfg) != set(expected):
         raise ValueError('Набор параметров config должен соответствовать config/roles.json')
     if cfg['centrality_mode'] not in ('exact', 'approximate'):
         raise ValueError('centrality_mode: ожидается exact или approximate')
     for key, value in cfg.items():
-        if key not in ('priority_weights', 'centrality_mode') and (not isinstance(value, (int, float)) or isinstance(value, bool)
-                                         or not math.isfinite(value) or value < 0):
+        if key not in ('priority_weights', 'centrality_mode') and (not _finite_number(value) or value < 0):
             raise ValueError(f'Неверный параметр {key}')
     for key in ('max_depth', 'random_seed', 'betweenness_samples', 'consolidator_min_payers',
                 'consolidator_min_seeds', 'distributor_min_payees', 'coordinator_min_degree',
@@ -36,8 +46,9 @@ def read_config(path=None):
     if not 0 < cfg['transit_min_matched_fraction'] <= 1:
         raise ValueError('transit_min_matched_fraction: ожидается число в (0, 1]')
     weights = cfg['priority_weights']
-    if set(weights) != set(expected['priority_weights']) or any(not isinstance(v, (float, int)) or
-            not math.isfinite(v) or v < 0 for v in weights.values()) or abs(sum(weights.values()) - 1) > 1e-9:
+    if (not isinstance(weights, dict) or set(weights) != set(expected['priority_weights'])
+            or any(not _finite_number(v) or v < 0 for v in weights.values())
+            or abs(sum(weights.values()) - 1) > 1e-9):
         raise ValueError('Веса приоритета должны быть неотрицательны и в сумме давать 1')
     return cfg
 

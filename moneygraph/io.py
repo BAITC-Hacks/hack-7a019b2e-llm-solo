@@ -1,6 +1,7 @@
 """Strict input validation. Adapted from the organizers' starter, with numeric reconciliation."""
 from pathlib import Path
 import hashlib
+import warnings
 import numpy as np
 import pandas as pd
 
@@ -31,6 +32,15 @@ def validate_tables(nodes, edges, tx):
     _integers(nodes, ['gid', 'depth'], 'nodes')
     _integers(edges, ['src', 'dst', 'n_tx', 'depth'], 'edges')
     _integers(tx, ['src', 'dst'], 'transactions')
+    # The export contract uses decimal strings of nonnegative signed int64 IDs.
+    # Accepting uint64 beyond this range would produce CSVs that cannot be read
+    # back as int64; accepting negative IDs would create an unusable TRACE JSON.
+    for frame, columns, name in ((nodes, ('gid',), 'nodes'),
+                                 (edges, ('src', 'dst'), 'edges'),
+                                 (tx, ('src', 'dst'), 'transactions')):
+        for column in columns:
+            require(frame[column].between(0, 2**63 - 1).all(),
+                    f'{name}.{column}: ожидается неотрицательный gid в диапазоне int64')
     require(nodes.gid.is_unique, 'nodes: повторяющийся gid')
     require(pd.api.types.is_bool_dtype(nodes.is_seed), 'nodes.is_seed: ожидается bool')
     require(nodes.depth.between(0, 4).all(), 'nodes.depth: ожидается 0–4')
@@ -47,8 +57,15 @@ def validate_tables(nodes, edges, tx):
         require((np.abs(cents - np.rint(cents)) < 0.001).all(), f'{name}: точность суммы больше двух знаков')
         require((cents < 2**53).all(), f'{name}: сумма вне безопасного диапазона')
     tx = tx.copy()
-    tx['date'] = pd.to_datetime(tx.date, errors='coerce', format='ISO8601')
+    require(not tx.date.map(lambda value: isinstance(value, (int, float, complex, np.number, np.bool_))).any(),
+            'transactions.date: числовая дата недопустима; нужна календарная дата')
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=FutureWarning,
+            message='In a future version of pandas, parsing datetimes with mixed time zones')
+        tx['date'] = pd.to_datetime(tx.date, errors='coerce', format='ISO8601')
     require(tx.date.notna().all(), 'transactions.date: неверная дата')
+    require(pd.api.types.is_datetime64_any_dtype(tx.date),
+            'transactions.date: несовместимые часовые пояса; нужны согласованные календарные даты')
     # Compare exact integer minor units, rather than trusting only matching pairs.
     tx['_cents'] = np.rint(tx.sum_kzt * 100).astype('int64')
     edges = edges.copy()
