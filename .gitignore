@@ -11,3 +11,6 @@ __pycache__/
 artifacts/
 .local/
 *.parquet
+
+# Архивы с данными хакатона: не публиковать (QA)
+*.zip

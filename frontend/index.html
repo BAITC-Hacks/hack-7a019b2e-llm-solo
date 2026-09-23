@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#edeae2">
+  <title>TRACE — Денежный след</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23212628'/%3E%3Cpath d='M8 11h24M20 11v21' fill='none' stroke='%23f1eee5' stroke-width='5'/%3E%3Ccircle cx='30' cy='30' r='4' fill='%23ce512f'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./data.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#app">К содержимому</a>
+  <div class="case-sheet">
+    <header class="masthead">
+      <a class="brand" href="./" aria-label="TRACE — главная"><span class="brand-word">TRACE<span class="brand-dot">.</span></span><span class="brand-caption">БЮРО ФИНАНСОВЫХ<br>СВЯЗЕЙ</span></a>
+      <div class="edition"><span>HACKALEM / ФИНАНСЫ</span><strong>LLM–SOLO</strong></div>
+      <div class="top-status"><i></i><span id="source-status">Подключение данных</span><small>ЛОКАЛЬНАЯ СЕССИЯ</small></div>
+    </header>
+    <nav class="case-nav" aria-label="Разделы приложения">
+      <button class="nav-item active" data-view="overview" aria-current="page"><span class="nav-index">01</span><span>Обзор</span></button>
+      <button class="nav-item" data-view="network"><span class="nav-index">02</span><span>Граф переводов</span></button>
+      <button class="nav-item" data-view="priority"><span class="nav-index">03</span><span>Приоритет проверки</span></button>
+      <button class="nav-item" data-view="clusters"><span class="nav-index">04</span><span>Кластеры</span><span id="nav-cluster-count" class="nav-count">—</span></button>
+      <span class="nav-note">FOLLOW THE MONEY <span aria-hidden="true">↗</span></span>
+    </nav>
+    <main>
+      <section class="page-heading">
+        <div class="heading-copy"><div class="eyebrow"><span class="index-mark" id="section-index">01</span> АНАЛИТИЧЕСКОЕ ДОСЬЕ <span class="heading-divider">/</span> <span id="breadcrumb">Обзор</span></div><h1 id="page-title">Денежный след.</h1><p id="page-description">От отдельного перевода — к структуре связей.</p></div>
+        <div class="heading-right"><div class="scope-seal"><span class="seal-cross" aria-hidden="true">✳</span><div><strong>ГЛУБИНА <span id="scope-depth">—</span></strong><small>ГРАНИЦА НАБЛЮДЕНИЯ</small></div></div><div class="heading-actions"><button class="button secondary" id="import-btn"><span data-icon="upload"></span>Импорт данных</button><button class="button primary" id="export-btn" disabled><span data-icon="download"></span>Экспорт списка</button></div></div>
+      </section>
+      <input id="graph-file" type="file" accept=".json,application/json" hidden>
+      <section class="filters" aria-label="Фильтры сети">
+        <label class="search"><span data-icon="search"></span><input id="search" type="search" placeholder="Найти след: GID, роль или обоснование" aria-label="Поиск по GID, роли или обоснованию" autocomplete="off"><kbd>/</kbd></label>
+        <div class="filter-select"><span data-icon="filter"></span><select id="role-filter" aria-label="Фильтр по роли"><option value="">Все роли</option></select></div>
+        <div class="filter-select"><select id="cluster-filter" aria-label="Фильтр по кластеру"><option value="">Все кластеры</option></select></div>
+        <button class="icon-button" id="reset-btn" title="Сбросить фильтры" aria-label="Сбросить фильтры"><span data-icon="reset"></span></button>
+      </section>
+      <div id="filter-summary" class="filter-summary" aria-live="polite" hidden></div>
+      <div id="app" tabindex="-1"><div class="loading-state"><span class="spinner"></span><h2>Восстанавливаем связи</h2><p>Загружаем сеть и результаты анализа…</p></div></div>
+      <footer class="page-footer"><span><b>TRACE.</b> LLM–SOLO / HACKALEM</span><span>Наблюдаемые связи. Проверяемые гипотезы.<br>Приоритет проверки не означает виновность.</span><span class="footer-end" aria-hidden="true">КОНЕЦ ЛИСТА <i>↗</i></span></footer>
+    </main>
+  </div>
+  <dialog id="node-dialog" class="node-dialog" aria-labelledby="detail-title"><div id="node-detail"></div></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <noscript><p>Для просмотра интерактивного графа включите JavaScript.</p></noscript>
+</body>
+</html>
