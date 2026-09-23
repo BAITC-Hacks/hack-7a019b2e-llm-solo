@@ -15,6 +15,7 @@ from .report import export, validate_outputs
 def run(data, out, config_path=None):
     started = time.perf_counter()
     cfg = read_config(config_path)
+    hashes = input_hashes(data)
     nodes, edges, tx = load(data)
     graph, frame, clusters, top = analyze(nodes, edges, tx, cfg)
     validate_outputs(nodes, frame, clusters, top)
@@ -24,7 +25,7 @@ def run(data, out, config_path=None):
         sum_kzt=sum(attrs['cents'] for _, _, attrs in graph.edges(data=True)) / 100,
         date_from=str(tx.date.min().date()) if len(tx) else None, date_to=str(tx.date.max().date()) if len(tx) else None,
         role_counts={str(k): int(v) for k, v in frame.role.value_counts().sort_index().items()},
-        analysis_seconds=round(time.perf_counter() - started, 3), input_sha256=input_hashes(data),
+        analysis_seconds=round(time.perf_counter() - started, 3), input_sha256=hashes,
         versions={name: importlib.metadata.version(name) for name in ('pandas', 'numpy', 'pyarrow', 'networkx')},
         warnings=['Граф ограничен 4 коленами, одним месяцем и внутрибанковскими переводами ≥5000 KZT.',
                   'Связь с seed и роль — гипотеза для проверки, не утверждение о виновности.',
@@ -35,7 +36,9 @@ def run(data, out, config_path=None):
         summary['warnings'].append('В наборе больше одного месяца; проверьте соответствие параметрам выгрузки.')
     if (edges.src == edges.dst).any():
         summary['warnings'].append('Самопереводы учтены в суммах, исключены из структурных связей и временного сопоставления.')
-    page = export(out, graph, frame, clusters, top, summary, cfg)
+    if input_hashes(data) != hashes:
+        raise ValueError('Исходные файлы изменились во время расчёта; повторите запуск на одном снимке')
+    page = export(out, graph, frame, clusters, top, summary, cfg, edges=edges, transactions=tx)
     summary['total_seconds'] = round(time.perf_counter() - started, 3)
     # The HTML shows analysis time; run.json includes the complete export wall time.
     (Path(out) / 'run.json').write_text(json.dumps(dict(summary=summary, config=cfg), ensure_ascii=False, indent=2), encoding='utf-8')

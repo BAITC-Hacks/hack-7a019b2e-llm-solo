@@ -4,6 +4,7 @@ import math
 import os
 from pathlib import Path
 import tempfile
+from .snapshot import make_snapshot
 
 ROLE_COLUMNS = ['gid', 'role', 'role_score', 'cluster_id', 'priority_score', 'evidence']
 CLUSTER_COLUMNS = ['cluster_id', 'n_nodes', 'n_seed', 'sum_kzt_internal', 'top_gids', 'hypothesis']
@@ -39,7 +40,7 @@ def _clean(value):
     return value
 
 
-def export(out_dir, graph, frame, clusters, top, summary, config):
+def export(out_dir, graph, frame, clusters, top, summary, config, *, edges=None, transactions=None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     csvs = {
@@ -57,16 +58,28 @@ def export(out_dir, graph, frame, clusters, top, summary, config):
     top_records = top.to_dict('records')
     for row in top_records:
         row['gid'] = str(row['gid'])
+    edge_depths = {(int(r.src), int(r.dst)): int(r.depth) for r in edges.itertuples()} if edges is not None else {}
     payload = _clean(dict(nodes=records,
-        edges=[dict(src=str(src), dst=str(dst), sum_kzt=attrs['cents'] / 100, n_tx=attrs['n_tx'])
+        edges=[dict(src=str(src), dst=str(dst), sum_kzt=attrs['cents'] / 100, cents=attrs['cents'],
+                    n_tx=attrs['n_tx'], depth=edge_depths.get((src, dst), 1))
                for src, dst, attrs in graph.edges(data=True)],
         clusters=cluster_records, top=top_records, summary=summary, config=config, exports=csvs))
     data_json = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(',', ':')).replace('<', '\\u003c')
     template = (Path(__file__).parent / 'viewer.html').read_text(encoding='utf-8')
     page = template.replace('/*__DATA__*/', data_json)
     files = {**csvs, 'report.html': page,
+             'graph.json': json.dumps(dict(nodes=payload['nodes'], edges=payload['edges']), ensure_ascii=False, allow_nan=False, separators=(',', ':')),
              'metrics.json': json.dumps(_clean(records), ensure_ascii=False, allow_nan=False, indent=2),
              'run.json': json.dumps(dict(summary=summary, config=config), ensure_ascii=False, allow_nan=False, indent=2)}
+    if transactions is not None:
+        if edges is None:
+            raise ValueError('Для API-снимка нужны исходные edges с depth')
+        # Publish this last. Go checks its CSV hashes and rejects a mixed run.
+        snapshot = make_snapshot(payload, transactions, csvs)
+        files['graph.json'] = json.dumps(dict(nodes=payload['nodes'], edges=payload['edges'],
+            snapshot_id=snapshot['snapshot_id']), ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+        files['api-snapshot.json'] = json.dumps(snapshot,
+            ensure_ascii=False, allow_nan=False, separators=(',', ':'))
     for name, content in files.items():
         fd, temp = tempfile.mkstemp(prefix='.write-', dir=out)
         try:

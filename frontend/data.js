@@ -2,12 +2,12 @@
 (function (root) {
   'use strict';
   const roles = {
-    coordinator: { label: 'Координатор', color: '#ec8a63' },
-    consolidator: { label: 'Консолидатор', color: '#c8b479' },
-    distributor: { label: 'Распределитель', color: '#b6a3c9' },
-    transit: { label: 'Транзит', color: '#87b3c3' },
-    terminal: { label: 'Получатель', color: '#97b69f' },
-    peripheral: { label: 'Периферия', color: '#a8a9a1' }
+    coordinator: { label: 'Структурный посредник', color: '#ec8a63' },
+    consolidator: { label: 'Кандидат на сбор', color: '#c8b479' },
+    distributor: { label: 'Кандидат на распределение', color: '#b6a3c9' },
+    transit: { label: 'Кандидат на транзит', color: '#87b3c3' },
+    terminal: { label: 'Наблюдаемый конец цепочки', color: '#97b69f' },
+    peripheral: { label: 'Роль не установлена', color: '#a8a9a1' }
   };
   function parse(text) {
     return JSON.parse(text.replace(/"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
@@ -31,6 +31,63 @@
     if (number > 1) throw new Error(field + ' должен находиться между 0 и 1.');
     return number;
   }
+  function integer(value, field) {
+    const number = nonnegative(value, field);
+    if (!Number.isSafeInteger(number)) throw new Error('Некорректное целое поле: ' + field);
+    return number;
+  }
+  // Optional analysis fields stay absent when absent: zero is an observation,
+  // not a replacement for a metric missing from an older imported snapshot.
+  function analysisFields(n) {
+    const result = {};
+    for (const key of ['temporal_2d', 'temporal_in_fraction', 'temporal_out_fraction',
+      'temporal_strict_in_fraction', 'temporal_strict_out_fraction']) {
+      if (Object.hasOwn(n, key)) {
+        if (typeof n[key] !== 'number') throw new Error('Некорректное поле: ' + key);
+        result[key] = score(n[key], key);
+      }
+    }
+    for (const key of ['temporal_matched_kzt', 'temporal_strict_matched_kzt', 'temporal_same_day_matched_kzt',
+      'external_in_kzt', 'external_out_kzt', 'betweenness']) {
+      if (Object.hasOwn(n, key)) {
+        if (typeof n[key] !== 'number') throw new Error('Некорректное поле: ' + key);
+        result[key] = nonnegative(n[key], key);
+      }
+    }
+    for (const key of ['in_tx', 'out_tx', 'active_days', 'seed_reach', 'other_clusters',
+      'component_id', 'temporal_window_days']) {
+      if (Object.hasOwn(n, key)) {
+        if (typeof n[key] !== 'number') throw new Error('Некорректное поле: ' + key);
+        result[key] = integer(n[key], key);
+      }
+    }
+    if (Object.hasOwn(n, 'pass_through')) {
+      if (n.pass_through !== null && typeof n.pass_through !== 'number') throw new Error('Некорректное поле: pass_through');
+      result.pass_through = n.pass_through === null ? null : nonnegative(n.pass_through, 'pass_through');
+    }
+    for (const key of ['peripheral_reason', 'peripheral_reason_text', 'limitations', 'next_query']) {
+      if (Object.hasOwn(n, key)) {
+        if (typeof n[key] !== 'string') throw new Error('Некорректное поле: ' + key);
+        result[key] = n[key];
+      }
+    }
+    if (Object.hasOwn(n, 'matched_roles')) {
+      if (!Array.isArray(n.matched_roles) || n.matched_roles.some(role => !Object.hasOwn(roles, role))) {
+        throw new Error('Некорректное поле: matched_roles');
+      }
+      result.matched_roles = [...n.matched_roles];
+    }
+    if (Object.hasOwn(n, 'priority_parts')) {
+      if (!n.priority_parts || Array.isArray(n.priority_parts) || typeof n.priority_parts !== 'object') {
+        throw new Error('Некорректное поле: priority_parts');
+      }
+      result.priority_parts = Object.fromEntries(Object.entries(n.priority_parts).map(([key, value]) => {
+        if (typeof value !== 'number') throw new Error('Некорректное поле: priority_parts');
+        return [key, score(value, 'priority_parts.' + key)];
+      }));
+    }
+    return result;
+  }
   function normalize(raw) {
     if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges) || !raw.nodes.length) {
       throw new Error('Файл должен содержать непустой массив nodes и массив edges.');
@@ -43,10 +100,11 @@
         gid: identifier(n.gid), role: n.role, cluster_id: cluster,
         role_score: score(n.role_score, 'role_score'),
         priority_score: score(n.priority_score, 'priority_score'),
-        evidence: String(n.evidence ?? ''), depth: nonnegative(n.depth, 'depth'),
+        evidence: String(n.evidence ?? ''), depth: integer(n.depth, 'depth'),
         is_seed: n.is_seed === true || n.is_seed === 1 || n.is_seed === 'True',
         in_kzt: nonnegative(n.in_kzt, 'in_kzt'), out_kzt: nonnegative(n.out_kzt, 'out_kzt'),
-        in_deg: 0, out_deg: 0, truncated_by_depth: n.truncated_by_depth === true
+        in_deg: 0, out_deg: 0, truncated_by_depth: n.truncated_by_depth === true,
+        ...analysisFields(n)
       };
     });
     const byId = new Map(nodes.map(n => [n.gid, n]));
@@ -55,15 +113,15 @@
     const outgoing = new Map(nodes.map(n => [n.gid, []]));
     const edges = raw.edges.map(e => {
       const edge = { src: identifier(e.src), dst: identifier(e.dst),
-        sum_kzt: nonnegative(e.sum_kzt, 'sum_kzt'), n_tx: nonnegative(e.n_tx, 'n_tx') };
+        sum_kzt: nonnegative(e.sum_kzt, 'sum_kzt'), n_tx: integer(e.n_tx, 'n_tx') };
       if (!byId.has(edge.src) || !byId.has(edge.dst)) throw new Error('Ребро ссылается на отсутствующий GID.');
       outgoing.get(edge.src).push(edge);
       incoming.get(edge.dst).push(edge);
       return edge;
     });
     nodes.forEach(n => {
-      n.in_deg = new Set(incoming.get(n.gid).map(e => e.src)).size;
-      n.out_deg = new Set(outgoing.get(n.gid).map(e => e.dst)).size;
+      n.in_deg = new Set(incoming.get(n.gid).map(e => e.src).filter(id => id !== n.gid)).size;
+      n.out_deg = new Set(outgoing.get(n.gid).map(e => e.dst).filter(id => id !== n.gid)).size;
       n.truncated_by_depth = n.truncated_by_depth || (n.depth >= 4 && !n.out_deg);
     });
     const clusters = new Map();
@@ -77,7 +135,51 @@
       const id = byId.get(e.src).cluster_id;
       if (id === byId.get(e.dst).cluster_id) clusters.get(id).internal += e.sum_kzt;
     });
-    return { nodes, edges, byId, incoming, outgoing, clusters };
+    if (raw.snapshot_id !== undefined && (typeof raw.snapshot_id !== 'string' || !raw.snapshot_id)) {
+      throw new Error('Некорректное поле: snapshot_id');
+    }
+    const graph = { nodes, edges, byId, incoming, outgoing, clusters, snapshot_id: raw.snapshot_id,
+      hasTransactions: Object.hasOwn(raw, 'transactions'), transactions: [],
+      transactionsById: new Map(nodes.map(n => [n.gid, []])) };
+    if (graph.hasTransactions) {
+      graph.transactions = normalizeTransactions(raw.transactions, graph);
+      for (const tx of graph.transactions) {
+        graph.transactionsById.get(tx.src).push(tx);
+        if (tx.dst !== tx.src) graph.transactionsById.get(tx.dst).push(tx);
+      }
+    }
+    return graph;
+  }
+  function normalizeTransactions(raw, graph) {
+    if (!Array.isArray(raw)) throw new Error('Поле transactions должно быть массивом.');
+    const items = raw.map(tx => {
+      if (!tx || typeof tx.row_id !== 'number' || typeof tx.cents !== 'number' || typeof tx.sum_kzt !== 'number') {
+        throw new Error('Некорректные поля перевода.');
+      }
+      const src = identifier(tx.src), dst = identifier(tx.dst);
+      if (!graph.byId.has(src) || !graph.byId.has(dst)) {
+        throw new Error('Перевод ссылается на отсутствующий GID.');
+      }
+      if (typeof tx.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(tx.date) ||
+          !Number.isFinite(Date.parse(tx.date)) || new Date(tx.date).toISOString().slice(0, 10) !== tx.date) {
+        throw new Error('Дата перевода должна иметь формат YYYY-MM-DD.');
+      }
+      const cents = integer(tx.cents, 'cents');
+      const amount = nonnegative(tx.sum_kzt, 'sum_kzt');
+      if (Math.abs(amount * 100 - cents) > 0.001) throw new Error('Сумма перевода не согласована с cents.');
+      return { row_id: integer(tx.row_id, 'row_id'), src, dst, date: tx.date, cents, sum_kzt: amount };
+    });
+    if (new Set(items.map(tx => tx.row_id)).size !== items.length) {
+      throw new Error('Повторяется row_id перевода.');
+    }
+    return items.sort((a, b) => a.date.localeCompare(b.date) || a.row_id - b.row_id);
+  }
+  function transactionPage(graph, gid, offset = 0, limit = 100) {
+    if (!graph.byId.has(gid)) throw new Error('Клиент не найден.');
+    integer(offset, 'offset'); integer(limit, 'limit');
+    if (limit < 1 || limit > 500) throw new Error('limit должен быть от 1 до 500.');
+    const items = graph.transactionsById.get(gid);
+    return { items: items.slice(offset, offset + limit), total: items.length, offset };
   }
   function neighborhood(graph, gid) {
     const ids = new Set([gid]);
@@ -92,7 +194,7 @@
     const lines = rows.map((n, i) => [i + 1, n.gid, n.role, n.priority_score, n.evidence].map(quote).join(','));
     return '\uFEFF' + [columns.join(','), ...lines].join('\r\n');
   }
-  const api = { roles, parse, normalize, neighborhood, csv };
+  const api = { roles, parse, normalize, transactionPage, neighborhood, csv };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MoneyGraph = api;
 })(typeof window !== 'undefined' ? window : globalThis);
