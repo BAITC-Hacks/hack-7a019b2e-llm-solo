@@ -16,10 +16,10 @@ function transaction(row_id = 0, extra = {}) {
   return { row_id, src: gid, dst: other, date: '2026-07-13', sum_kzt: 99.95, cents: 9995, ...extra };
 }
 function response(body) {
-  return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+  return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(body)).buffer };
 }
 function localFile(body, name = 'graph.json') {
-  return { name, size: 100, text: async () => JSON.stringify(body) };
+  return { name, size: 100, arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(body)).buffer };
 }
 function harness(fetch) {
   const elements = new Map();
@@ -33,10 +33,10 @@ function harness(fetch) {
     },
     querySelectorAll: () => [], addEventListener() {}
   };
-  const sandbox = { window: { MoneyGraph: M, scrollTo() {} }, document, fetch, Intl, AbortController,
+  const sandbox = { window: { MoneyGraph: M, scrollTo() {}, TraceAssistant: { create: () => ({ reset() {}, select() {}, open() {} }) }, TraceAgent: { fingerprint: async () => 'a'.repeat(64) } }, document, fetch, Intl, AbortController, TextDecoder,
     setTimeout: (...args) => setTimeout(...args).unref(), clearTimeout, console, URL, Blob, navigator: {} };
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(require.resolve('./app.js'), 'utf8') +
+  vm.runInContext(fs.readFileSync(require.resolve('./app-source.js'), 'utf8') +
     '\nthis.testing = {state, installGraph, openNode, showTransactions, loadDefault, loadLocalFile, timingDetail, cash};', sandbox);
   return { ...sandbox.testing, elements };
 }
@@ -139,9 +139,9 @@ test('the latest selected local file wins even if previous file reading finishes
   const app = harness(async () => ({ ok: false, status: 404 }));
   await settle();
   let finishOld;
-  const oldRead = app.loadLocalFile({ name: 'old.json', size: 100, text: () => new Promise(resolve => { finishOld = resolve; }) });
+  const oldRead = app.loadLocalFile({ name: 'old.json', size: 100, arrayBuffer: () => new Promise(resolve => { finishOld = resolve; }) });
   await app.loadLocalFile(localFile({ ...fixture(), snapshot_id: 'latest' }, 'latest.json'));
-  finishOld(JSON.stringify(fixture()));
+  finishOld(new TextEncoder().encode(JSON.stringify(fixture())).buffer);
   await oldRead;
   assert.equal(app.state.graph.snapshot_id, 'latest');
 });
