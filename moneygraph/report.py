@@ -73,19 +73,23 @@ def export(out_dir, graph, frame, clusters, top, summary, config, *, edges=None,
              'run.json': json.dumps(dict(summary=summary, config=config), ensure_ascii=False, allow_nan=False, indent=2)}
     if transactions is not None:
         if edges is None:
-            raise ValueError('Для API-снимка нужны исходные edges с depth')
-        # Publish this last. Go checks its CSV hashes and rejects a mixed run.
+            raise ValueError('Для полного JSON нужны исходные edges с depth')
         snapshot = make_snapshot(payload, transactions, csvs)
-        files['graph.json'] = json.dumps(dict(nodes=payload['nodes'], edges=payload['edges'],
-            snapshot_id=snapshot['snapshot_id']), ensure_ascii=False, allow_nan=False, separators=(',', ':'))
-        files['api-snapshot.json'] = json.dumps(snapshot,
+        files['graph.json'] = json.dumps(snapshot,
             ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+    # TRACE is copied into the output directory: the existing loopback server
+    # serves the app and ../graph.json without exposing the repository itself.
+    frontend = Path(__file__).resolve().parent.parent / 'frontend'
+    for name in ('index.html', 'app.js', 'data.js', 'styles.css'):
+        files[f'frontend/{name}'] = (frontend / name).read_text(encoding='utf-8')
     for name, content in files.items():
-        fd, temp = tempfile.mkstemp(prefix='.write-', dir=out)
+        target = out / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(prefix='.write-', dir=target.parent)
         try:
             with os.fdopen(fd, 'w', encoding='utf-8', newline='') as handle:
                 handle.write(content)
-            os.replace(temp, out / name)
+            os.replace(temp, target)
         finally:
             if os.path.exists(temp):
                 os.unlink(temp)

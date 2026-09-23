@@ -92,6 +92,9 @@
     if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges) || !raw.nodes.length) {
       throw new Error('Файл должен содержать непустой массив nodes и массив edges.');
     }
+    if (raw.schema_version !== undefined && raw.schema_version !== 1) {
+      throw new Error('Неподдерживаемая schema_version. Ожидается версия 1.');
+    }
     const nodes = raw.nodes.map(n => {
       if (!n || !Object.hasOwn(roles, n.role)) throw new Error('Неизвестная роль узла.');
       const cluster = String(n.cluster_id ?? '');
@@ -148,7 +151,60 @@
         if (tx.dst !== tx.src) graph.transactionsById.get(tx.dst).push(tx);
       }
     }
+    if (raw.schema_version === 1) validateSnapshot(raw, graph);
     return graph;
+  }
+  function validateSnapshot(raw, graph) {
+    if (!graph.hasTransactions || !graph.snapshot_id) {
+      throw new Error('Снимок версии 1 должен содержать transactions и snapshot_id.');
+    }
+    const centsFor = (value, field) => {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 ||
+          !Number.isSafeInteger(Math.round(value * 100)) || Math.abs(value * 100 - Math.round(value * 100)) > .001) {
+        throw new Error('Некорректная точность суммы: ' + field);
+      }
+      return Math.round(value * 100);
+    };
+    const totals = new Map(graph.nodes.map(n => [n.gid, { incoming: 0, outgoing: 0, inCount: 0, outCount: 0 }]));
+    const byPair = new Map();
+    const add = (record, key, value) => {
+      record[key] += value;
+      if (!Number.isSafeInteger(record[key])) throw new Error('Сумма выходит за безопасный численный диапазон.');
+    };
+    for (const edge of raw.edges) {
+      if (typeof edge.src !== 'string' || typeof edge.dst !== 'string' ||
+          typeof edge.cents !== 'number' || typeof edge.n_tx !== 'number') {
+        throw new Error('Некорректные типы ребра в снимке версии 1.');
+      }
+      const cents = integer(edge.cents, 'edge.cents'), count = integer(edge.n_tx, 'edge.n_tx');
+      if (centsFor(edge.sum_kzt, 'edge.sum_kzt') !== cents) throw new Error('Сумма ребра не совпадает с cents.');
+      const key = edge.src + ',' + edge.dst;
+      if (byPair.has(key)) throw new Error('Повторяется направленная пара рёбер.');
+      byPair.set(key, { cents, count });
+      add(totals.get(edge.src), 'outgoing', cents); add(totals.get(edge.dst), 'incoming', cents);
+      add(totals.get(edge.src), 'outCount', count); add(totals.get(edge.dst), 'inCount', count);
+    }
+    const txPairs = new Map();
+    for (const tx of graph.transactions) {
+      const key = tx.src + ',' + tx.dst;
+      if (!txPairs.has(key)) txPairs.set(key, { cents: 0, count: 0 });
+      add(txPairs.get(key), 'cents', tx.cents); add(txPairs.get(key), 'count', 1);
+    }
+    if (txPairs.size !== byPair.size || [...byPair].some(([key, value]) =>
+      txPairs.get(key)?.cents !== value.cents || txPairs.get(key)?.count !== value.count)) {
+      throw new Error('Суммы или количества transactions не совпадают с edges.');
+    }
+    for (const node of raw.nodes) {
+      if (typeof node.gid !== 'string' || typeof node.in_tx !== 'number' || typeof node.out_tx !== 'number') {
+        throw new Error('Некорректные типы узла в снимке версии 1.');
+      }
+      const total = totals.get(node.gid);
+      if (centsFor(node.in_kzt, 'node.in_kzt') !== total.incoming ||
+          centsFor(node.out_kzt, 'node.out_kzt') !== total.outgoing ||
+          integer(node.in_tx, 'node.in_tx') !== total.inCount || integer(node.out_tx, 'node.out_tx') !== total.outCount) {
+        throw new Error('Обороты или количества операций узла не совпадают с edges.');
+      }
+    }
   }
   function normalizeTransactions(raw, graph) {
     if (!Array.isArray(raw)) throw new Error('Поле transactions должно быть массивом.');

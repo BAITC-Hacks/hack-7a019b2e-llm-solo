@@ -15,5 +15,3 @@ artifacts/
 # Архивы с данными хакатона: не публиковать (QA)
 *.zip
 out/
-backend/moneygraph-api
-backend/moneygraph-api.exe

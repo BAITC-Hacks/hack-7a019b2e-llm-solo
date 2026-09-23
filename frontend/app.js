@@ -4,7 +4,7 @@ const M = window.MoneyGraph;
 const $ = selector => document.querySelector(selector);
 const state = { graph: null, view: 'overview', query: '', role: '', cluster: '',
   focus: null, selected: null, page: 1, sort: 'priority_score', desc: true, all: false, color: 'role', loading: true,
-  source: 'local', transactions: null };
+  transactionOffset: 0 };
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
 const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -252,7 +252,7 @@ function timingDetail(n) {
     '. Доля входа <strong>' + pct(n.temporal_in_fraction) + '%</strong>; доля выхода <strong>' + pct(n.temporal_out_fraction) + '%</strong>.' +
     (n.temporal_strict_in_fraction === undefined || n.temporal_strict_out_fraction === undefined ? '' :
       '<br>Без совпадений внутри дня: ' + pct(n.temporal_strict_in_fraction) + '% входа и ' + pct(n.temporal_strict_out_fraction) + '% выхода.') +
-    '<br>Сопоставление допускает дробление и объединение сумм. Очерёдность внутри дня и происхождение тех же денег неизвестны.</p></div>';
+    '<br>Сопоставление допускает дробление и объединение сумм; самопереводы исключены из объёма и долей. Очерёдность внутри дня и происхождение тех же денег неизвестны.</p></div>';
 }
 function priorityDetail(n) {
   if (!n.priority_parts) return '';
@@ -262,10 +262,8 @@ function priorityDetail(n) {
 }
 function transactionDetail(n) {
   const title = '<h3>Отдельные переводы</h3>';
-  if (state.source !== 'api') return title + '<p class="muted">Локальный graph.json содержит агрегированные связи. Полные операции не загружены; запрос к другому набору на сервере не выполняется.</p>';
-  const page = state.transactions;
-  if (!page || page.loading) return title + '<p class="muted" role="status">Загружаем переводы…</p>';
-  if (page.error) return title + '<div class="detail-warning"><p>' + esc(page.error) + '</p></div><button class="button secondary small" data-tx-offset="' + page.offset + '">Повторить загрузку переводов</button>';
+  if (!state.graph.hasTransactions) return title + '<p class="muted">Этот JSON содержит только агрегированные связи. Для отдельных операций импортируйте новый graph.json с массивом transactions.</p>';
+  const page = M.transactionPage(state.graph, n.gid, state.transactionOffset);
   const rows = page.items.map(tx => '<tr><td>' + tx.date + '<br><small>Строка ' + tx.row_id + '</small></td><td>' +
     (tx.src === n.gid && tx.dst === n.gid ? 'Самоперевод' : tx.src === n.gid ? 'Исходящий' : 'Входящий') +
     '<br><button class="gid-button" data-node="' + (tx.src === n.gid ? tx.dst : tx.src) + '">' + (tx.src === n.gid ? tx.dst : tx.src) +
@@ -297,45 +295,16 @@ function renderDetail() {
     (connections.length ? connections.map(e => '<button class="connection" data-node="' + e.id + '"><span><strong>' + e.id + '</strong><small>' + e.direction + ' · ' + e.n_tx + ' переводов</small></span><b>' + cash(e.sum_kzt) + '</b>' + icon('chevron') + '</button>').join('') : '<p class="muted">Переводы отсутствуют в доступной выборке.</p>') +
     '</div>' + transactionDetail(n) + '<div class="detail-footer">Кластер #' + n.cluster_id + ' · Обезличенный идентификатор</div>';
 }
-let transactionTicket = 0, transactionController;
-function cancelTransactions() {
-  ++transactionTicket;
-  transactionController?.abort();
-  state.transactions = null;
-}
-async function loadTransactions(offset = 0) {
-  if (state.source !== 'api' || !state.selected) return;
-  cancelTransactions();
-  const ticket = transactionTicket, graph = state.graph, gid = state.selected;
-  const controller = transactionController = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  const current = () => ticket === transactionTicket && graph === state.graph && gid === state.selected && state.source === 'api';
-  state.transactions = { loading: true, offset }; renderDetail();
-  try {
-    const response = await fetch('/api/nodes/' + encodeURIComponent(gid) + '/transactions?offset=' + offset + '&limit=100', { cache: 'no-store', signal: controller.signal });
-    if (!response.ok) throw new Error('Не удалось загрузить переводы (HTTP ' + response.status + ').');
-    if (graph.snapshot_id && response.headers.get('X-Snapshot-ID') !== graph.snapshot_id) {
-      throw new Error('Набор на сервере изменился. Обновите страницу перед просмотром переводов.');
-    }
-    const page = M.transactions(M.parse(await response.text()), gid, graph);
-    if (page.items.length > 100 || page.items.length !== Math.min(100, Math.max(0, page.total - offset))) {
-      throw new Error('Ответ не соответствует запрошенной странице переводов.');
-    }
-    if (!current()) return;
-    state.transactions = { ...page, offset }; renderDetail();
-  } catch (error) {
-    if (!current()) return;
-    state.transactions = { offset, error: error.name === 'AbortError' ? 'Сервер не ответил за 15 секунд. Повторите загрузку.' : error.message };
-    renderDetail();
-  } finally { clearTimeout(timer); }
+function showTransactions(offset = 0) {
+  if (!state.selected || !Number.isSafeInteger(offset) || offset < 0) return;
+  state.transactionOffset = offset; renderDetail();
 }
 function openNode(id) {
   if (!state.graph.byId.has(id)) return;
-  cancelTransactions();
+  state.transactionOffset = 0;
   state.selected = id; renderDetail();
   if (!$('#node-dialog').open) $('#node-dialog').showModal();
   $('#node-dialog').scrollTop = 0;
-  if (state.source === 'api') loadTransactions();
 }
 let toastTimer;
 function toast(message) {
@@ -347,9 +316,8 @@ function syncFilters() {
 }
 function reset() { state.query = state.role = state.cluster = ''; state.focus = null; state.page = 1; syncFilters(); render(); }
 function switchView(view) { state.view = view; state.page = 1; render(); window.scrollTo({ top: 0, behavior: 'instant' }); }
-function installGraph(graph, name, source = 'local') {
-  cancelTransactions();
-  state.graph = graph; state.loading = false; state.error = ''; state.selected = null; state.focus = null; state.source = source;
+function installGraph(graph, name) {
+  state.graph = graph; state.loading = false; state.error = ''; state.selected = null; state.focus = null; state.transactionOffset = 0;
   if ($('#node-dialog').open) $('#node-dialog').close();
   sceneCache.clear();
   $('#cluster-filter').innerHTML = '<option value="">Все кластеры</option>' +
@@ -368,16 +336,16 @@ async function loadDefault() {
   const controller = loadController = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   state.loading = true; state.error = '';
-  $('#source-status').textContent = 'Подключение к локальному API';
-  if (!state.graph) $('#app').innerHTML = '<div class="loading-state"><span class="spinner"></span><h2>Загружаем сеть</h2><p>Локальный API /api/graph</p></div>';
+  $('#source-status').textContent = 'Загрузка локального graph.json';
+  if (!state.graph) $('#app').innerHTML = '<div class="loading-state"><span class="spinner"></span><h2>Загружаем сеть</h2><p>Локальный graph.json</p></div>';
   try {
-    const response = await fetch('/api/graph', { cache: 'no-store', signal: controller.signal });
-    if (!response.ok) throw new Error('API /api/graph недоступен (HTTP ' + response.status + '). Запустите локальный backend или импортируйте graph.json.');
+    const response = await fetch('../graph.json', { cache: 'no-store', signal: controller.signal });
+    if (!response.ok) throw new Error('Файл ../graph.json недоступен (HTTP ' + response.status + '). Выполните расчёт Python или импортируйте graph.json.');
     const graph = M.normalize(M.parse(await response.text()));
-    if (ticket === loadTicket) installGraph(graph, '/api/graph', 'api');
+    if (ticket === loadTicket) installGraph(graph, '../graph.json');
   } catch (error) {
     if (ticket !== loadTicket) return;
-    state.loading = false; state.error = error.name === 'AbortError' ? 'Локальный API не ответил за 15 секунд. Повторите загрузку или импортируйте graph.json.' : error.message;
+    state.loading = false; state.error = error.name === 'AbortError' ? 'graph.json не загрузился за 15 секунд. Повторите загрузку или импортируйте файл.' : error.message;
     $('#source-status').textContent = 'Ожидаем данные'; render();
   } finally { clearTimeout(timer); }
 }
@@ -433,7 +401,7 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('button, [data-node]');
   if (!button || button.disabled) return;
   const data = button.dataset;
-  if (data.txOffset !== undefined) { loadTransactions(Number(data.txOffset)); return; }
+  if (data.txOffset !== undefined) { showTransactions(Number(data.txOffset)); return; }
   if (data.node) { if (!graphWasDragged) openNode(data.node); return; }
   if (data.view) { switchView(data.view); return; }
   if (data.role) { state.role = data.role; state.focus = null; state.page = 1; syncFilters(); render(); return; }
@@ -454,7 +422,6 @@ document.addEventListener('click', async event => {
   else if (action === 'copy') { try { await navigator.clipboard.writeText(state.selected); toast('GID скопирован'); } catch { toast('Выделите GID в карточке и скопируйте его вручную.'); } }
 });
 $('#node-dialog').addEventListener('click', event => { if (event.target === $('#node-dialog')) { const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) event.target.close(); } });
-$('#node-dialog').addEventListener('close', cancelTransactions);
 document.addEventListener('keydown', event => {
   if (event.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && !$('#node-dialog').open) { event.preventDefault(); $('#search').focus(); }
   if ((event.key === 'Enter' || event.key === ' ') && event.target.classList.contains('graph-node')) { event.preventDefault(); openNode(event.target.dataset.node); }
@@ -467,13 +434,24 @@ $('#search').addEventListener('input', event => {
 $('#role-filter').innerHTML += Object.entries(M.roles).map(([role, info]) => '<option value="' + role + '">' + info.label + '</option>').join('');
 $('#role-filter').addEventListener('change', event => { state.role = event.target.value; state.page = 1; state.focus = null; render(); });
 $('#cluster-filter').addEventListener('change', event => { state.cluster = event.target.value; state.page = 1; state.focus = null; render(); });
-$('#graph-file').addEventListener('change', async event => {
-  const file = event.target.files[0]; if (!file) return;
+async function loadLocalFile(file) {
+  const ticket = ++loadTicket;
+  loadController?.abort();
   try {
     if (file.size > 30 * 1024 * 1024) throw new Error('Выберите файл размером до 30 МБ.');
     const graph = M.normalize(M.parse(await file.text()));
-    ++loadTicket; loadController?.abort(); installGraph(graph, file.name); toast('Данные загружены: ' + fmt(graph.nodes.length) + ' клиентов');
-  } catch (error) { toast('Не удалось открыть файл. ' + error.message); }
+    if (ticket !== loadTicket) return;
+    installGraph(graph, file.name); toast('Данные загружены: ' + fmt(graph.nodes.length) + ' клиентов');
+  } catch (error) {
+    if (ticket !== loadTicket) return;
+    state.loading = false;
+    state.error = 'Не удалось открыть файл. ' + error.message;
+    if (state.graph) toast(state.error); else render();
+  }
+}
+$('#graph-file').addEventListener('change', async event => {
+  const file = event.target.files[0]; if (!file) return;
+  await loadLocalFile(file);
   event.target.value = '';
 });
 loadDefault();

@@ -12,11 +12,14 @@ function fixture(extra = {}) {
     { gid: other, role: 'peripheral', cluster_id: 0, role_score: .2, priority_score: .1 }
   ], edges: [{ src: gid, dst: other, sum_kzt: 99.95, n_tx: 1 }] };
 }
-function page(id = 1, src = gid, dst = other) {
-  return { items: [{ row_id: id, src, dst, date: '2026-07-13', sum_kzt: 99.95, cents: 9995 }], total: 1 };
+function transaction(row_id = 0, extra = {}) {
+  return { row_id, src: gid, dst: other, date: '2026-07-13', sum_kzt: 99.95, cents: 9995, ...extra };
 }
-function response(body, snapshot = 'snapshot-one') {
-  return { ok: true, status: 200, headers: new Headers({ 'X-Snapshot-ID': snapshot }), text: async () => JSON.stringify(body) };
+function response(body) {
+  return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+}
+function localFile(body, name = 'graph.json') {
+  return { name, size: 100, text: async () => JSON.stringify(body) };
 }
 function harness(fetch) {
   const elements = new Map();
@@ -31,10 +34,10 @@ function harness(fetch) {
     querySelectorAll: () => [], addEventListener() {}
   };
   const sandbox = { window: { MoneyGraph: M, scrollTo() {} }, document, fetch, Intl, AbortController,
-    setTimeout, clearTimeout, console, URL, Blob, navigator: {} };
+    setTimeout: (...args) => setTimeout(...args).unref(), clearTimeout, console, URL, Blob, navigator: {} };
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(require.resolve('./app.js'), 'utf8') +
-    '\nthis.testing = {state, installGraph, openNode, loadTransactions, cancelTransactions, loadDefault, timingDetail, cash};', sandbox);
+    '\nthis.testing = {state, installGraph, openNode, showTransactions, loadDefault, loadLocalFile, timingDetail, cash};', sandbox);
   return { ...sandbox.testing, elements };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -43,9 +46,10 @@ test('analysis metrics preserve observed zero, absent values and all role matche
   const graph = M.normalize(fixture({ temporal_in_fraction: 0, temporal_out_fraction: 0,
     temporal_strict_in_fraction: 0, temporal_strict_out_fraction: 0, temporal_matched_kzt: 0,
     temporal_window_days: 2, peripheral_reason_text: 'Нет совместимого объёма', matched_roles: ['transit', 'distributor'],
-    priority_parts: { flow: .2, bridge: 0 } }));
+    priority_parts: { flow: .2, bridge: 0 }, external_in_kzt: 100.01, external_out_kzt: 99.95 }));
   assert.equal(graph.nodes[0].temporal_in_fraction, 0);
   assert.equal(graph.nodes[0].priority_parts.bridge, 0);
+  assert.equal(graph.nodes[0].external_in_kzt, 100.01);
   assert.deepEqual(graph.nodes[0].matched_roles, ['transit', 'distributor']);
   assert.equal(graph.nodes[1].temporal_in_fraction, undefined);
   assert.equal(graph.snapshot_id, 'snapshot-one');
@@ -55,32 +59,34 @@ test('analysis metrics preserve observed zero, absent values and all role matche
   }
 });
 
-test('transactions retain exact IDs, real dates, cents and duplicate operations with distinct row IDs', () => {
-  const graph = M.normalize(fixture());
-  const raw = page(); raw.items.push({ ...raw.items[0], row_id: 2 }); raw.total = 2;
-  const normalized = M.transactions(raw, gid, graph);
-  assert.equal(normalized.items.length, 2);
-  assert.equal(normalized.items[0].src, gid);
-  assert.equal(normalized.items[0].date, '2026-07-13');
-  assert.equal(normalized.items[0].cents, 9995);
+test('transactions retain exact IDs, real dates, cents and duplicates with distinct row IDs', () => {
+  const graph = M.normalize({ ...fixture(), transactions: [transaction(0), transaction(1)] });
+  assert.equal(graph.transactions.length, 2);
+  assert.equal(graph.transactions[0].src, gid);
+  assert.equal(graph.transactions[0].date, '2026-07-13');
+  assert.equal(graph.transactions[0].cents, 9995);
+  assert.equal(graph.transactionsById.get(gid).length, 2);
+  assert.equal(graph.transactionsById.get(other).length, 2);
   for (const extra of [{ date: '2026-02-30' }, { date: '2026-07-13T00:00:00Z' }, { cents: 9994 },
     { src: '3', dst: '4' }, { row_id: 1.5 }]) {
-    assert.throws(() => M.transactions({ items: [{ ...page().items[0], ...extra }], total: 1 }, gid, graph));
+    assert.throws(() => M.normalize({ ...fixture(), transactions: [transaction(0, extra)] }));
   }
+  assert.throws(() => M.normalize({ ...fixture(), transactions: [transaction(0), transaction(0)] }), /row_id/);
+  assert.throws(() => M.normalize({ ...fixture(), transactions: null }), /transactions/);
 });
 
-test('failed API graph load gives an error and never falls back to a stale file', async () => {
+test('failed static JSON load gives an error without silently loading a different file', async () => {
   const requested = [];
-  const app = harness(async url => { requested.push(url); return { ok: false, status: 503 }; });
+  const app = harness(async url => { requested.push(url); return { ok: false, status: 404 }; });
   await settle();
-  assert.deepEqual(requested, ['/api/graph']);
+  assert.deepEqual(requested, ['../graph.json']);
   assert.equal(app.state.graph, null);
-  assert.match(app.elements.get('#app').innerHTML, /HTTP 503/);
+  assert.match(app.elements.get('#app').innerHTML, /HTTP 404/);
 });
 
-test('local imports never request unrelated transactions and card keeps cents and zero fractions', async () => {
+test('legacy imports show missing operations explicitly, retain cents and zero fractions', async () => {
   let calls = 0;
-  const app = harness(async () => { calls++; return { ok: false, status: 503 }; });
+  const app = harness(async () => { calls++; return { ok: false, status: 404 }; });
   await settle();
   app.installGraph(M.normalize(fixture({ temporal_in_fraction: 0, temporal_out_fraction: 0,
     temporal_strict_in_fraction: 0, temporal_strict_out_fraction: 0, temporal_window_days: 2 })), 'local.json');
@@ -89,54 +95,86 @@ test('local imports never request unrelated transactions and card keeps cents an
   assert.equal(calls, 1);
   assert.match(app.elements.get('#node-detail').innerHTML, /100,01/);
   assert.match(app.elements.get('#node-detail').innerHTML, /Доля входа <strong>0%/);
-  assert.match(app.elements.get('#node-detail').innerHTML, /Полные операции не загружены/);
+  assert.match(app.elements.get('#node-detail').innerHTML, /массивом transactions/);
 });
 
-test('slow response from previous card cannot overwrite currently selected node', async () => {
-  const pending = [];
-  const app = harness(url => url === '/api/graph' ? Promise.resolve(response(fixture())) :
-    new Promise(resolve => pending.push({ url, resolve })));
+test('slow default file response cannot overwrite a more recent local import', async () => {
+  let resolveDefault;
+  const app = harness(() => new Promise(resolve => { resolveDefault = resolve; }));
+  const local = { ...fixture(), snapshot_id: 'local-choice', transactions: [transaction()] };
+  await app.loadLocalFile(localFile(local));
+  assert.equal(app.state.graph.snapshot_id, 'local-choice');
+  resolveDefault(response(fixture()));
   await settle();
-  app.openNode(gid);
-  app.openNode(other);
-  pending[1].resolve(response(page(2)));
-  await settle();
-  assert.equal(app.state.transactions.items[0].row_id, 2);
-  pending[0].resolve(response(page(1)));
-  await settle();
-  assert.equal(app.state.selected, other);
-  assert.equal(app.state.transactions.items[0].row_id, 2);
-  assert.match(pending[1].url, /offset=0&limit=100$/);
-  app.cancelTransactions();
+  assert.equal(app.state.graph.snapshot_id, 'local-choice');
+  assert.equal(app.state.graph.transactions.length, 1);
 });
 
-test('server snapshot changes are visible and transaction page can be retried', async () => {
-  const app = harness(url => Promise.resolve(url === '/api/graph' ? response(fixture()) : response(page(), 'new-snapshot')));
+test('a corrupt imported transaction does not replace the working graph', async () => {
+  const app = harness(async () => response(fixture()));
   await settle();
-  app.openNode(gid);
-  await settle();
-  assert.match(app.state.transactions.error, /Набор на сервере изменился/);
-  assert.match(app.elements.get('#node-detail').innerHTML, /Повторить загрузку переводов/);
-  app.cancelTransactions();
+  const graph = app.state.graph;
+  await app.loadLocalFile(localFile({ ...fixture(), transactions: [transaction(0, { cents: -1 })] }));
+  assert.equal(app.state.graph, graph);
+  assert.match(app.elements.get('#toast').textContent, /Не удалось открыть файл/);
 });
 
-test('transaction pagination requests the requested offset and preserves total', async () => {
-  const urls = [];
-  const app = harness(url => {
-    urls.push(url);
-    if (url === '/api/graph') return Promise.resolve(response(fixture()));
-    const offset = Number(new URL(url, 'http://127.0.0.1').searchParams.get('offset'));
-    const items = Array.from({ length: offset === 0 ? 100 : 1 }, (_, index) => ({ ...page().items[0], row_id: offset + index + 1 }));
-    return Promise.resolve(response({ items, total: 101 }));
-  });
+test('transaction pagination uses local indices and makes no additional requests', async () => {
+  const raw = { ...fixture(), transactions: Array.from({ length: 101 }, (_, index) => transaction(index)) };
+  let calls = 0;
+  const app = harness(async () => { calls++; return response(raw); });
   await settle();
   app.openNode(gid);
-  await settle();
-  assert.equal(app.state.transactions.items.length, 100);
-  await app.loadTransactions(100);
-  assert.equal(app.state.transactions.total, 101);
-  assert.equal(app.state.transactions.items[0].row_id, 101);
-  assert.match(urls.at(-1), /offset=100&limit=100$/);
+  assert.match(app.elements.get('#node-detail').innerHTML, /1–100 из 101/);
+  app.showTransactions(100);
   assert.match(app.elements.get('#node-detail').innerHTML, /101–101 из 101/);
-  app.cancelTransactions();
+  assert.equal(M.transactionPage(app.state.graph, gid, 100).items[0].row_id, 100);
+  assert.equal(calls, 1);
+  app.openNode(other);
+  assert.equal(app.state.transactionOffset, 0);
+  assert.match(app.elements.get('#node-detail').innerHTML, /1–100 из 101/);
+});
+
+test('the latest selected local file wins even if previous file reading finishes later', async () => {
+  const app = harness(async () => ({ ok: false, status: 404 }));
+  await settle();
+  let finishOld;
+  const oldRead = app.loadLocalFile({ name: 'old.json', size: 100, text: () => new Promise(resolve => { finishOld = resolve; }) });
+  await app.loadLocalFile(localFile({ ...fixture(), snapshot_id: 'latest' }, 'latest.json'));
+  finishOld(JSON.stringify(fixture()));
+  await oldRead;
+  assert.equal(app.state.graph.snapshot_id, 'latest');
+});
+
+test('transaction index is ordered by date and row ID; self-transfer is indexed once', () => {
+  const graph = M.normalize({ ...fixture(), transactions: [
+    transaction(5), transaction(3), transaction(2, { dst: gid, date: '2026-07-12' })
+  ] });
+  assert.deepEqual(M.transactionPage(graph, gid).items.map(tx => tx.row_id), [2, 3, 5]);
+  assert.equal(M.transactionPage(graph, other).total, 2);
+  assert.throws(() => M.transactionPage(graph, gid, -1));
+  assert.throws(() => M.transactionPage(graph, gid, 0, 0));
+  assert.throws(() => M.transactionPage(graph, '999'));
+});
+
+test('versioned snapshot reconciles transactions, directed edges and node totals', () => {
+  const valid = { ...fixture(), schema_version: 1, transactions: [transaction()] };
+  Object.assign(valid.edges[0], { cents: 9995 });
+  Object.assign(valid.nodes[0], { in_kzt: 0, out_kzt: 99.95, in_tx: 0, out_tx: 1 });
+  Object.assign(valid.nodes[1], { in_kzt: 99.95, out_kzt: 0, in_tx: 1, out_tx: 0 });
+  assert.equal(M.normalize(valid).transactions.length, 1);
+  for (const mutate of [
+    raw => { raw.schema_version = 2; },
+    raw => { delete raw.transactions; },
+    raw => { raw.transactions = []; },
+    raw => { raw.edges[0].cents++; },
+    raw => { raw.edges[0].n_tx++; },
+    raw => { raw.edges.push({ ...raw.edges[0] }); },
+    raw => { raw.nodes[0].out_kzt = 99.94; },
+    raw => { raw.nodes[1].in_tx = 2; },
+    raw => { raw.nodes[1].in_kzt = 99.951; }
+  ]) {
+    const raw = structuredClone(valid); mutate(raw);
+    assert.throws(() => M.normalize(raw));
+  }
 });

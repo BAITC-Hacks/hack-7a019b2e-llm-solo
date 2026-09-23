@@ -33,7 +33,7 @@ class SnapshotTests(unittest.TestCase):
             self.prepare(root)
             out = root / 'out'
             run(root, out)
-            snapshot = json.loads((out / 'api-snapshot.json').read_text(encoding='utf-8'))
+            snapshot = json.loads((out / 'graph.json').read_text(encoding='utf-8'))
             self.assertEqual(snapshot['schema_version'], 1)
             self.assertEqual(len(snapshot['snapshot_id']), 64)
             self.assertEqual(len(snapshot['nodes']), 5)
@@ -51,9 +51,15 @@ class SnapshotTests(unittest.TestCase):
                 self.assertIn(edge['depth'], (1, 2))
             for name, digest in snapshot['output_sha256'].items():
                 self.assertEqual(hashlib.sha256((out / name).read_bytes()).hexdigest(), digest)
-            graph = json.loads((out / 'graph.json').read_text(encoding='utf-8'))
-            self.assertEqual(graph['nodes'], snapshot['nodes'])
-            self.assertEqual(graph['edges'], snapshot['edges'])
+            roles = pd.read_csv(out / 'nodes_roles.csv', dtype={'gid': str}).set_index('gid')
+            for node in snapshot['nodes']:
+                self.assertEqual(roles.loc[node['gid'], 'role'], node['role'])
+                self.assertEqual(roles.loc[node['gid'], 'evidence'], node['evidence'])
+                self.assertEqual(roles.loc[node['gid'], 'priority_score'], node['priority_score'])
+            self.assertEqual(sum(t['cents'] for t in snapshot['transactions']),
+                             sum(e['cents'] for e in snapshot['edges']))
+            for name in ('index.html', 'app.js', 'data.js', 'styles.css'):
+                self.assertTrue((out / 'frontend' / name).is_file(), name)
 
     def test_export_ordinals_and_csvs_are_invariant_to_input_order(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -62,7 +68,7 @@ class SnapshotTests(unittest.TestCase):
             run(root, root / 'a')
             self.prepare(root, shuffled=True)
             run(root, root / 'b')
-            a, b = [json.loads((root / child / 'api-snapshot.json').read_text(encoding='utf-8')) for child in ('a', 'b')]
+            a, b = [json.loads((root / child / 'graph.json').read_text(encoding='utf-8')) for child in ('a', 'b')]
             for key in ('nodes', 'edges', 'transactions', 'clusters', 'top', 'output_sha256'):
                 self.assertEqual(a[key], b[key], key)
             # Input byte hashes may differ after a Parquet rewrite; derived data must not.

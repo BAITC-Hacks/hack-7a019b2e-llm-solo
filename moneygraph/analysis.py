@@ -224,7 +224,7 @@ def classify(row, cfg, centrality_threshold):
         'coordinator': f"Посредничество {row['betweenness']:.3g}; связи с {row['other_clusters']} другими кластерами; {row['seed_reach']} seed-путей",
         'distributor': f"Веер: {row['out_deg']} получателей, {row['out_tx']} переводов; {row['in_deg']} плательщиков",
         'consolidator': f"Сбор: {row['in_deg']} плательщиков, {row['in_tx']} переводов; {row['seed_reach']} seed-путей",
-        'transit': f"Пропуск {ratio:.2f}; ≤{cfg['transit_window_days']} дн.: {temporal_in:.0%} входа, {temporal_out:.0%} выхода; внутри дня порядок неизвестен" if reliable_ratio else '',
+        'transit': f"Пропуск {ratio:.3f}; ≤{cfg['transit_window_days']} дн.: {temporal_in:.1%} входа, {temporal_out:.1%} выхода; внутри дня порядок неизвестен" if reliable_ratio else '',
         'terminal': f"Вход {row['in_kzt']:,.0f} KZT от {row['in_deg']} клиентов, 0 исходящих; depth={row['depth']}",
         'peripheral': f"{row['in_deg']} входящих, {row['out_deg']} исходящих связей; {peripheral_reason(row)[1]}",
     }

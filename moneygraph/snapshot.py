@@ -1,4 +1,4 @@
-"""Versioned, self-contained export consumed by the local Go API."""
+"""Versioned, self-contained JSON for the offline TRACE frontend."""
 import hashlib
 import json
 
@@ -11,7 +11,7 @@ def make_snapshot(payload, transactions, csvs):
     """Use validated, canonically ordered inputs; never round IDs through float.
 
     row_id is an export ordinal, not a bank transaction ID. Identical source
-    operations remain distinct rows. CSV digests bind the API to the same run.
+    operations remain distinct rows. CSV digests identify the corresponding exports.
     """
     rows = []
     for index, row in enumerate(transactions.itertuples(index=False)):
