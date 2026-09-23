@@ -90,5 +90,12 @@ def load(data_dir):
 
 
 def input_hashes(data_dir):
-    return {f'{name}.parquet': hashlib.sha256((Path(data_dir) / f'{name}.parquet').read_bytes()).hexdigest()
-            for name in ('nodes', 'edges', 'transactions')}
+    hashes = {}
+    for name in ('nodes', 'edges', 'transactions'):
+        path = Path(data_dir) / f'{name}.parquet'
+        digest = hashlib.sha256()
+        with path.open('rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                digest.update(chunk)
+        hashes[path.name] = digest.hexdigest()
+    return hashes

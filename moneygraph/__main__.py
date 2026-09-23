@@ -1,6 +1,4 @@
 import argparse
-import functools
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.metadata
 import json
 from pathlib import Path
@@ -10,6 +8,7 @@ import networkx as nx
 from .analysis import analyze, read_config
 from .io import load, input_hashes
 from .report import export, validate_outputs
+from .files import atomic_text
 
 
 def run(data, out, config_path=None):
@@ -41,7 +40,7 @@ def run(data, out, config_path=None):
     page = export(out, graph, frame, clusters, top, summary, cfg, edges=edges, transactions=tx)
     summary['total_seconds'] = round(time.perf_counter() - started, 3)
     # The HTML shows analysis time; run.json includes the complete export wall time.
-    (Path(out) / 'run.json').write_text(json.dumps(dict(summary=summary, config=cfg), ensure_ascii=False, indent=2), encoding='utf-8')
+    atomic_text(Path(out) / 'run.json', json.dumps(dict(summary=summary, config=cfg), ensure_ascii=False, allow_nan=False, indent=2))
     return summary, page
 
 
@@ -57,8 +56,8 @@ def main():
         summary, page = run(args.data, args.out, args.config)
         print(json.dumps(dict(status='ok', report=str(page.resolve()), **summary), ensure_ascii=False, indent=2))
         if args.serve:
-            handler = functools.partial(SimpleHTTPRequestHandler, directory=str(Path(args.out).resolve()))
-            server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)
+            from .server import make_server
+            server = make_server(args.out, args.port)
             print(f'Просмотр: http://127.0.0.1:{args.port}/report.html', flush=True)
             try:
                 server.serve_forever()
