@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+node_modules/
+data/
+coverage/
+*.log
+.venv/
+__pycache__/
+.pytest_cache/
+artifacts/
+.local/
+*.parquet

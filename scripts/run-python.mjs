@@ -1,0 +1,10 @@
+import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const local = resolve(root, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
+const python = process.env.PYTHON || (existsSync(local) ? local : process.platform === 'win32' ? 'python' : 'python3');
+const child = spawn(python, process.argv.slice(2), { cwd: root, stdio: 'inherit', windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+child.on('error', () => { console.error('Python не найден. Создайте .venv и установите requirements.txt по README.'); process.exitCode = 1; });
+child.on('exit', code => { process.exitCode = code ?? 1; });

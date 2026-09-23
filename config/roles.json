@@ -1,0 +1,17 @@
+{
+  "max_depth": 4,
+  "random_seed": 42,
+  "louvain_resolution": 1.0,
+  "betweenness_samples": 64,
+  "consolidator_min_payers": 5,
+  "consolidator_min_seeds": 2,
+  "distributor_min_payees": 5,
+  "distributor_fan_ratio": 2.0,
+  "transit_ratio_min": 0.8,
+  "transit_ratio_max": 1.2,
+  "coordinator_min_degree": 4,
+  "coordinator_min_seeds": 3,
+  "coordinator_min_other_clusters": 2,
+  "coordinator_centrality_quantile": 0.9,
+  "priority_weights": {"seed_reach": 0.30, "flow": 0.25, "bridge": 0.20, "fan": 0.15, "role_support": 0.10}
+}
