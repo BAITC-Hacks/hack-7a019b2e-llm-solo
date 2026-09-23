@@ -3,3 +3,6 @@ data/
 out/
 __pycache__/
 *.pyc
+.env
+.env.*
+!.env.example

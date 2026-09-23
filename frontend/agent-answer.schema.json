@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "facts", "hypotheses", "limitations", "next_steps"],
+  "properties": {
+    "summary": { "type": "string", "minLength": 1, "maxLength": 1500 },
+    "facts": {
+      "type": "array", "maxItems": 8,
+      "items": { "$ref": "#/$defs/fact" }
+    },
+    "hypotheses": {
+      "type": "array", "maxItems": 8,
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "limitations": {
+      "type": "array", "maxItems": 8,
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "next_steps": {
+      "type": "array", "maxItems": 8,
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object", "additionalProperties": false,
+      "required": ["text", "node_ids"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "node_ids": { "type": "array", "maxItems": 8, "items": { "type": "string", "pattern": "^[0-9]+$" } }
+      }
+    },
+    "fact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["text", "node_ids"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "node_ids": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^[0-9]+$" } }
+      }
+    }
+  }
+}

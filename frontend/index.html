@@ -4,31 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#edeae2">
-  <title>TRACE — Денежный след</title>
+  <title>TRACE - Денежный след</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23212628'/%3E%3Cpath d='M8 11h24M20 11v21' fill='none' stroke='%23f1eee5' stroke-width='5'/%3E%3Ccircle cx='30' cy='30' r='4' fill='%23ce512f'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./agent.css">
   <script defer src="./data.js"></script>
-  <script defer src="./app.js"></script>
+  <script defer src="./agent.js"></script>
+  <script defer src="./agent-ui.js"></script>
+  <script defer src="./app.js?v=trace-lion-2"></script>
 </head>
 <body>
   <a class="skip-link" href="#app">К содержимому</a>
   <div class="case-sheet">
     <header class="masthead">
-      <a class="brand" href="./" aria-label="TRACE — главная"><span class="brand-word">TRACE<span class="brand-dot">.</span></span><span class="brand-caption">БЮРО ФИНАНСОВЫХ<br>СВЯЗЕЙ</span></a>
-      <div class="edition"><span>HACKALEM / ФИНАНСЫ</span><strong>LLM–SOLO</strong></div>
+      <a class="brand" href="./" aria-label="TRACE - главная"><span class="brand-word">TRACE<span class="brand-dot">.</span></span><span class="brand-caption">БЮРО ФИНАНСОВЫХ<br>СВЯЗЕЙ</span></a>
+      <div class="edition"><span>HACKALEM / ФИНАНСЫ</span><strong>LLM-SOLO</strong></div>
       <div class="top-status"><i></i><span id="source-status">Подключение данных</span><small>ЛОКАЛЬНАЯ СЕССИЯ</small></div>
     </header>
     <nav class="case-nav" aria-label="Разделы приложения">
       <button class="nav-item active" data-view="overview" aria-current="page"><span class="nav-index">01</span><span>Обзор</span></button>
       <button class="nav-item" data-view="network"><span class="nav-index">02</span><span>Граф переводов</span></button>
       <button class="nav-item" data-view="priority"><span class="nav-index">03</span><span>Приоритет проверки</span></button>
-      <button class="nav-item" data-view="clusters"><span class="nav-index">04</span><span>Кластеры</span><span id="nav-cluster-count" class="nav-count">—</span></button>
+      <button class="nav-item" data-view="clusters"><span class="nav-index">04</span><span>Кластеры</span><span id="nav-cluster-count" class="nav-count">-</span></button>
       <span class="nav-note">FOLLOW THE MONEY <span aria-hidden="true">↗</span></span>
     </nav>
     <main>
       <section class="page-heading">
-        <div class="heading-copy"><div class="eyebrow"><span class="index-mark" id="section-index">01</span> АНАЛИТИЧЕСКОЕ ДОСЬЕ <span class="heading-divider">/</span> <span id="breadcrumb">Обзор</span></div><h1 id="page-title">Денежный след.</h1><p id="page-description">От отдельного перевода — к структуре связей.</p></div>
-        <div class="heading-right"><div class="scope-seal"><span class="seal-cross" aria-hidden="true">✳</span><div><strong>ГЛУБИНА <span id="scope-depth">—</span></strong><small>ГРАНИЦА НАБЛЮДЕНИЯ</small></div></div><div class="heading-actions"><button class="button secondary" id="import-btn"><span data-icon="upload"></span>Импорт данных</button><button class="button primary" id="export-btn" disabled><span data-icon="download"></span>Экспорт списка</button></div></div>
+        <div class="heading-copy"><div class="eyebrow"><span class="index-mark" id="section-index">01</span> АНАЛИТИЧЕСКОЕ ДОСЬЕ <span class="heading-divider">/</span> <span id="breadcrumb">Обзор</span></div><h1 id="page-title">Денежный след.</h1><p id="page-description">От отдельного перевода - к структуре связей.</p></div>
       </section>
       <input id="graph-file" type="file" accept=".json,application/json" hidden>
       <section class="filters" aria-label="Фильтры сети">
@@ -39,10 +41,52 @@
       </section>
       <div id="filter-summary" class="filter-summary" aria-live="polite" hidden></div>
       <div id="app" tabindex="-1"><div class="loading-state"><span class="spinner"></span><h2>Восстанавливаем связи</h2><p>Загружаем сеть и результаты анализа…</p></div></div>
-      <footer class="page-footer"><span><b>TRACE.</b> LLM–SOLO / HACKALEM</span><span>Наблюдаемые связи. Проверяемые гипотезы.<br>Приоритет проверки не означает виновность.</span><span class="footer-end" aria-hidden="true">КОНЕЦ ЛИСТА <i>↗</i></span></footer>
+      <footer class="page-footer"><span><b>TRACE.</b> LLM-SOLO / HACKALEM</span><span>Наблюдаемые связи. Проверяемые гипотезы.<br>Приоритет проверки не означает виновность.</span><span class="footer-end" aria-hidden="true">КОНЕЦ ЛИСТА <i>↗</i></span></footer>
     </main>
   </div>
   <dialog id="node-dialog" class="node-dialog" aria-labelledby="detail-title"><div id="node-detail"></div></dialog>
+  <aside id="agent-companion" class="agent-companion" data-open="false" data-state="idle" aria-label="Помощник След">
+    <span id="agent-pet-status" class="agent-pet-bubble" role="status">Я рядом. Разберём след?</span>
+    <button id="agent-pet-button" class="agent-pet-button" type="button" aria-label="След: открыть чат" aria-expanded="false" aria-controls="agent-dialog">
+      <span class="agent-pet" aria-hidden="true"><span class="agent-ear"></span><span class="agent-ear"></span><span class="agent-pet-head"><span class="agent-muzzle"></span><span class="agent-eye left"></span><span class="agent-eye right"></span><span class="agent-pet-nose"></span><span class="agent-whisker"></span><span class="agent-whisker right"></span></span><span class="agent-folder">TRACE</span><span class="agent-paw"></span></span>
+      <span class="agent-pet-indicator" aria-hidden="true"></span>
+    </button>
+  </aside>
+  <dialog id="agent-dialog" class="agent-dialog" aria-labelledby="agent-title" aria-modal="false">
+    <div class="agent-shell">
+      <header class="agent-top"><span class="agent-presence" aria-hidden="true"></span><div><h2 id="agent-title">След</h2><span class="agent-label">ТВОЙ ВТОРОЙ ВЗГЛЯД / AI</span></div><button id="agent-close" type="button" class="icon-button" aria-label="Свернуть чат"><span data-icon="minus"></span></button></header>
+      <div id="agent-scroll" class="agent-scroll">
+        <div id="agent-empty" class="agent-empty"><span class="agent-label">НАЧНЁМ СО СЛЕДА</span><h3>Какой узел разберём?</h3><p id="agent-empty-text">Выберите клиента на графе или в списке. Я закреплю его контекст здесь.</p></div>
+        <section id="agent-context" class="agent-context" aria-label="Контекст выбранного узла" hidden>
+          <div><span class="agent-label">ОБЪЕКТ АНАЛИЗА / GID</span><strong id="agent-gid"></strong><span id="agent-role"></span></div>
+          <button id="agent-graph" type="button" class="text-button">На графе <span data-icon="arrow"></span></button>
+          <div class="agent-context-foot"><span id="agent-context-meta"></span><span id="agent-dataset"></span></div>
+        </section>
+        <p id="agent-boundary" class="agent-boundary" hidden></p>
+        <div id="agent-intro" class="agent-intro" hidden>
+          <div class="agent-intro-action"><button id="agent-start" class="button primary" type="button">Разобрать этот узел <span data-icon="arrow"></span></button></div>
+          <div class="agent-outline"><span><b>01</b> Факты</span><span><b>02</b> Гипотезы</span><span><b>03</b> Ограничения</span><span><b>04</b> Проверки</span></div>
+          <p>Разберём роль, проверим гипотезу или выберем следующий шаг. Выводы сверяйте с данными: ответ ИИ не является доказательством.</p>
+          <small>Вопрос отправится на сервер TRACE только по нажатию «Отправить» или «Разобрать этот узел».</small>
+        </div>
+        <div id="agent-history" aria-label="История разбора выбранного узла"></div>
+        <div id="agent-progress" class="agent-progress" hidden><span class="spinner" aria-hidden="true"></span><div><strong>Готовим аналитическую записку</strong><p id="agent-pending-question"></p></div></div>
+        <div id="agent-error" class="agent-error" role="alert" hidden><span class="agent-label">ЗАПИСКА НЕ СОЗДАНА</span><p id="agent-error-text"></p><button id="agent-retry" class="text-button" type="button" hidden>Повторить запрос ↗</button></div>
+        <p id="agent-notice" class="agent-boundary" role="status" hidden></p>
+        <button id="agent-cancel-retry" class="text-button" type="button" hidden>Возобновить запрос ↗</button>
+      </div>
+      <footer class="agent-composer">
+        <div class="agent-status-line"><span id="agent-status" role="status" aria-live="polite"></span><button id="agent-new" type="button" class="text-button">Новый разбор</button></div>
+        <div id="agent-prompts" class="agent-prompts" aria-label="Подсказки для вопросов"></div>
+        <form id="agent-form">
+          <label for="agent-question">Вопрос по этому узлу</label>
+          <textarea id="agent-question" rows="2" maxlength="2000" placeholder="Например: что может опровергнуть эту роль?" aria-describedby="agent-input-help"></textarea>
+          <div class="agent-form-bottom"><span id="agent-count">0 / 2000</span><div><button id="agent-cancel" type="button" class="button secondary small" hidden>Остановить</button><button id="agent-send" type="submit" class="button primary small" disabled>Отправить <span data-icon="arrow"></span></button></div></div>
+          <small id="agent-input-help"></small>
+        </form>
+      </footer>
+    </div>
+  </dialog>
   <div id="toast" class="toast" role="status" hidden></div>
   <noscript><p>Для просмотра интерактивного графа включите JavaScript.</p></noscript>
 </body>

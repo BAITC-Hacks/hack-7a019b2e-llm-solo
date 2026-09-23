@@ -4,6 +4,7 @@ const M = window.MoneyGraph;
 const $ = selector => document.querySelector(selector);
 const state = { graph: null, view: 'overview', query: '', role: '', cluster: '',
   focus: null, selected: null, page: 1, sort: 'priority_score', desc: true, all: false, color: 'role', loading: true };
+const assistant = window.TraceAssistant.create({ onOpenNode: openNode, onShowGraph: focusNode });
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
 const fmt = value => number.format(Number(value) || 0);
@@ -232,7 +233,8 @@ function render() {
     return;
   }
   const rows = filtered();
-  $('#export-btn').disabled = !rows.length;
+  const exportButton = $('#export-btn');
+  if (exportButton) exportButton.disabled = !rows.length;
   $('#filter-summary').hidden = !state.query && !state.role && !state.cluster;
   $('#filter-summary').textContent = 'Найдено ' + fmt(rows.length) + ' из ' + fmt(state.graph.nodes.length) + ' клиентов';
   $('#app').innerHTML = state.view === 'overview' ? overview(rows) : state.view === 'network' ? graphPanel(false) :
@@ -248,6 +250,7 @@ function renderDetail() {
   $('#node-detail').innerHTML = '<div class="detail-top"><span class="eyebrow">ПРОФИЛЬ КЛИЕНТА</span><button class="icon-button" data-action="close" aria-label="Закрыть карточку">' + icon('close') + '</button></div>' +
     '<h2 id="detail-title">' + n.gid + '</h2><div class="detail-tags">' + badge(n) + '<span class="label-pill">УРОВЕНЬ ' + n.depth + '</span>' + (n.is_seed ? '<span class="seed-tag">SEED</span>' : '') + '<button class="icon-button" data-action="copy" aria-label="Скопировать GID">' + icon('copy') + '</button></div>' +
     '<div class="detail-score"><div><span>Приоритет проверки</span><strong>' + pct(n.priority_score) + '<small>/ 100</small></strong></div><div><span>Скор роли</span><strong>' + pct(n.role_score) + '<small>/ 100</small></strong></div></div><p class="score-explanation">Скор отражает критерии алгоритма, а не вероятность виновности.</p>' +
+    '<button class="agent-launch" data-ai-open="' + n.gid + '"><span class="agent-launch-mark">AI<br>↗</span><span><strong>Разобрать с ИИ</strong><small>Факты, гипотезы и следующий шаг</small></span>' + icon('arrow') + '</button>' +
     '<h3>Почему этот узел</h3><div class="evidence">' + icon('search') + '<p>' + esc(n.evidence || 'Обоснование не передано источником данных.') + '</p></div>' +
     (n.truncated_by_depth ? '<div class="detail-warning">' + icon('warning') + '<p><strong>Граница выгрузки</strong>Нет исходящих на 4-м уровне. Для вывода о получателе нужны переводы за пределами обхода.</p></div>' : '') +
     (n.is_seed ? '<div class="detail-warning"><p><strong>Неполный входящий поток</strong>Для seed-клиента видны не все поступления. Обороты не являются балансом счёта.</p></div>' : '') +
@@ -259,7 +262,7 @@ function renderDetail() {
 }
 function openNode(id) {
   if (!state.graph.byId.has(id)) return;
-  state.selected = id; renderDetail();
+  state.selected = id; assistant.select(id); renderDetail();
   if (!$('#node-dialog').open) $('#node-dialog').showModal();
   $('#node-dialog').scrollTop = 0;
 }
@@ -273,27 +276,40 @@ function syncFilters() {
 }
 function reset() { state.query = state.role = state.cluster = ''; state.focus = null; state.page = 1; syncFilters(); render(); }
 function switchView(view) { state.view = view; state.page = 1; render(); window.scrollTo({ top: 0, behavior: 'instant' }); }
-function installGraph(graph, name) {
+function focusNode(gid) {
+  state.selected = gid; assistant.select(gid);
+  state.focus = gid; state.query = gid; state.role = state.cluster = ''; state.view = 'network';
+  $('#node-dialog').close(); syncFilters(); render();
+}
+function installGraph(graph, name, datasetHash) {
   state.graph = graph; state.loading = false; state.selected = null; state.focus = null;
+  assistant.reset(graph, datasetHash);
   if ($('#node-dialog').open) $('#node-dialog').close();
   sceneCache.clear();
   $('#cluster-filter').innerHTML = '<option value="">Все кластеры</option>' +
     [...graph.clusters.keys()].sort((a, b) => Number(a) - Number(b)).map(id => '<option value="' + id + '">Кластер #' + id + '</option>').join('');
   $('#nav-cluster-count').textContent = graph.clusters.size;
-  $('#scope-depth').textContent = graph.nodes.reduce((depth, n) => Math.max(depth, n.depth), 0);
+  const scopeDepth = $('#scope-depth');
+  if (scopeDepth) scopeDepth.textContent = graph.nodes.reduce((depth, n) => Math.max(depth, n.depth), 0);
   $('#source-status').textContent = fmt(graph.nodes.length) + ' клиентов · данные загружены';
   $('#source-status').title = name;
   $('.top-status').classList.add('connected');
   reset();
 }
 let loadTicket = 0;
+async function decodeGraph(bytes) {
+  const graph = M.normalize(M.parse(new TextDecoder().decode(bytes)));
+  // If Web Crypto is unavailable, the graph still works; only AI is disabled.
+  const datasetHash = await window.TraceAgent.fingerprint(bytes).catch(() => null);
+  return { graph, datasetHash };
+}
 async function loadDefault() {
   const ticket = ++loadTicket;
   try {
     const response = await fetch('../out/graph.json', { cache: 'no-store' });
     if (!response.ok) throw new Error('Загрузите graph.json, созданный аналитическим пайплайном, через «Импорт данных».');
-    const graph = M.normalize(M.parse(await response.text()));
-    if (ticket === loadTicket) installGraph(graph, 'out/graph.json');
+    const { graph, datasetHash } = await decodeGraph(await response.arrayBuffer());
+    if (ticket === loadTicket) installGraph(graph, 'out/graph.json', datasetHash);
   } catch (error) {
     if (ticket !== loadTicket) return;
     state.loading = false; state.error = error.message;
@@ -352,11 +368,12 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('button, [data-node]');
   if (!button || button.disabled) return;
   const data = button.dataset;
+  if (data.aiOpen) { $('#node-dialog').close(); assistant.open(data.aiOpen); return; }
   if (data.node) { if (!graphWasDragged) openNode(data.node); return; }
   if (data.view) { switchView(data.view); return; }
   if (data.role) { state.role = data.role; state.focus = null; state.page = 1; syncFilters(); render(); return; }
   if (data.cluster) { state.cluster = data.cluster; state.query = ''; state.focus = null; state.view = 'network'; syncFilters(); render(); return; }
-  if (data.focus) { state.focus = data.focus; state.query = data.focus; state.role = state.cluster = ''; state.view = 'network'; $('#node-dialog').close(); syncFilters(); render(); return; }
+  if (data.focus) { focusNode(data.focus); return; }
   if (data.sort) { state.desc = state.sort === data.sort ? !state.desc : true; state.sort = data.sort; state.page = 1; render(); return; }
   if (data.page) { state.page += Number(data.page); render(); return; }
   if (data.color) { state.color = data.color; render(); return; }
@@ -373,7 +390,7 @@ document.addEventListener('click', async event => {
 });
 $('#node-dialog').addEventListener('click', event => { if (event.target === $('#node-dialog')) { const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) event.target.close(); } });
 document.addEventListener('keydown', event => {
-  if (event.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && !$('#node-dialog').open) { event.preventDefault(); $('#search').focus(); }
+  if (event.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && !$('#node-dialog').open && !$('#agent-dialog').open) { event.preventDefault(); $('#search').focus(); }
   if ((event.key === 'Enter' || event.key === ' ') && event.target.classList.contains('graph-node')) { event.preventDefault(); openNode(event.target.dataset.node); }
 });
 let searchTimer;
@@ -386,11 +403,18 @@ $('#role-filter').addEventListener('change', event => { state.role = event.targe
 $('#cluster-filter').addEventListener('change', event => { state.cluster = event.target.value; state.page = 1; state.focus = null; render(); });
 $('#graph-file').addEventListener('change', async event => {
   const file = event.target.files[0]; if (!file) return;
+  const ticket = ++loadTicket;
   try {
     if (file.size > 30 * 1024 * 1024) throw new Error('Выберите файл размером до 30 МБ.');
-    const graph = M.normalize(M.parse(await file.text()));
-    ++loadTicket; installGraph(graph, file.name); toast('Данные загружены: ' + fmt(graph.nodes.length) + ' клиентов');
-  } catch (error) { toast('Не удалось открыть файл. ' + error.message); }
+    const { graph, datasetHash } = await decodeGraph(await file.arrayBuffer());
+    if (ticket !== loadTicket) return;
+    installGraph(graph, file.name, datasetHash); toast('Данные загружены: ' + fmt(graph.nodes.length) + ' клиентов');
+  } catch (error) {
+    if (ticket === loadTicket) {
+      toast('Не удалось открыть файл. ' + error.message);
+      if (!state.graph) { state.loading = false; state.error = error.message; render(); }
+    }
+  }
   event.target.value = '';
 });
 loadDefault();
