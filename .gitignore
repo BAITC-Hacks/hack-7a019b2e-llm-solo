@@ -1,0 +1,5 @@
+_case_materials/
+data/
+out/
+__pycache__/
+*.pyc
