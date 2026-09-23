@@ -14,7 +14,10 @@ import pandas as pd
 from .analysis import build_graph, read_config
 from .io import input_hashes, load, require
 from .report import CLUSTER_COLUMNS, ROLE_COLUMNS, TOP_COLUMNS, validate_outputs
-from .snapshot import RULE_VERSION, SCHEMA_VERSION
+from .snapshot import RULE_VERSION, SCHEMA_VERSION, analysis_digest
+from .insights import build_overviews, role_sensitivity, sensitivity_profiles
+from .witnesses import build_witnesses
+from .observations import build_observations
 
 
 def _json(path):
@@ -78,7 +81,8 @@ def verify(data='data', out='artifacts', config_path=None):
     digests = {name: hashlib.sha256((out / name).read_bytes()).hexdigest() for name in csvs}
     _equal(snapshot['output_sha256'], digests, 'CSV и graph.json принадлежат разным расчётам или повреждены')
     identity = dict(schema_version=SCHEMA_VERSION, rule_version=RULE_VERSION,
-                    input_sha256=hashes, config=cfg, output_sha256=digests)
+                    input_sha256=hashes, config=cfg, output_sha256=digests,
+                    analysis_sha256=snapshot['analysis_sha256'])
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
                            allow_nan=False, separators=(',', ':')).encode('utf-8')).hexdigest()
     _equal(snapshot['snapshot_id'], digest, 'graph.json: неверный snapshot_id')
@@ -146,6 +150,30 @@ def verify(data='data', out='artifacts', config_path=None):
     _equal(snapshot['top'], expected_top, 'top_nodes.csv: значения отличаются от JSON')
     _equal(_json(out / 'metrics.json'), records, 'metrics.json: метрики принадлежат другому снимку')
 
+    # Reconstruct row references and summaries from the original transfers. This
+    # checks content independently of the stored hash (which is not a signature).
+    witnesses = build_witnesses(graph, frame, tx, cfg)
+    observations = build_observations(graph, tx)
+    stability = role_sensitivity(frame, cfg)
+    for row in records:
+        gid = int(row['gid'])
+        for key in ('bridge_evidence', 'temporal_evidence'):
+            _equal(row[key], witnesses[gid][key], f'graph.json: неверные переводы-свидетели {key}')
+        for key in ('motifs', 'observed_facts', 'motif_summary'):
+            _equal(row[key], observations[gid][key], f'graph.json: неверный наблюдаемый факт {key}')
+        _equal(row['role_stability'], stability[gid], 'graph.json: неверная устойчивость роли')
+        require(row['role'] != 'coordinator' or bool(row['bridge_evidence']),
+                'graph.json: у coordinator отсутствует направленный путь')
+        _equal(row['role_stability']['profiles']['base'], row['role'], 'graph.json: роль не соответствует правилам')
+        for name, metric in (('matched_cents', 'temporal_matched_kzt'),
+                             ('strict_matched_cents', 'temporal_strict_matched_kzt')):
+            _equal(row['temporal_evidence'][name], _money(row[metric]),
+                   'graph.json: объём переводов-свидетелей не соответствует метрике')
+    for key, expected in build_overviews(graph, frame).items():
+        _equal(snapshot[key], expected, f'graph.json: неверный обзор {key}')
+    _equal(snapshot['sensitivity_profiles'], sensitivity_profiles(cfg), 'graph.json: неверные профили порогов')
+    _equal(snapshot['analysis_sha256'], analysis_digest(snapshot), 'graph.json: неверный хеш объяснений')
+
     totals = dict(n_nodes=len(nodes), n_edges=len(edges), n_transactions=len(tx),
                   n_seed=int(nodes.is_seed.sum()), n_clusters=len(clusters),
                   n_components=nx.number_weakly_connected_components(graph), n_isolates=nx.number_of_isolates(graph),
@@ -168,7 +196,8 @@ def verify(data='data', out='artifacts', config_path=None):
     return dict(status='ok', snapshot_id=snapshot['snapshot_id'], **totals,
                 total_seconds=seconds, output_sha256=digests,
                 checks=['input_hashes', 'csv_schemas', 'csv_json_consistency', 'all_nodes',
-                        'transactions_and_duplicates', 'money_and_counts', 'clusters', 'ranking', 'runtime'])
+                        'transactions_and_duplicates', 'money_and_counts', 'clusters', 'ranking',
+                        'witnesses', 'observed_facts', 'role_stability', 'component_overviews', 'runtime'])
 
 
 def main():

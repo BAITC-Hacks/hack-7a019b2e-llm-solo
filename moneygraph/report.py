@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 from .snapshot import make_snapshot
+from .insights import build_overviews, sensitivity_profiles
 
 ROLE_COLUMNS = ['gid', 'role', 'role_score', 'cluster_id', 'priority_score', 'evidence']
 CLUSTER_COLUMNS = ['cluster_id', 'n_nodes', 'n_seed', 'sum_kzt_internal', 'top_gids', 'hypothesis']
@@ -63,7 +64,8 @@ def export(out_dir, graph, frame, clusters, top, summary, config, *, edges=None,
         edges=[dict(src=str(src), dst=str(dst), sum_kzt=attrs['cents'] / 100, cents=attrs['cents'],
                     n_tx=attrs['n_tx'], depth=edge_depths.get((src, dst), 1))
                for src, dst, attrs in graph.edges(data=True)],
-        clusters=cluster_records, top=top_records, summary=summary, config=config, exports=csvs))
+        clusters=cluster_records, top=top_records, summary=summary, config=config, exports=csvs,
+        sensitivity_profiles=sensitivity_profiles(config), **build_overviews(graph, frame)))
     data_json = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(',', ':')).replace('<', '\\u003c')
     template = (Path(__file__).parent / 'viewer.html').read_text(encoding='utf-8')
     page = template.replace('/*__DATA__*/', data_json)

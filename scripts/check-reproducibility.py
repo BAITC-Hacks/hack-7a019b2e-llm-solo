@@ -29,7 +29,8 @@ def equivalent(left, right):
             raise AssertionError(f'CSV differs: {name}')
         hashes[name] = hashlib.sha256(content).hexdigest()
     a, b = [json.loads((p / 'graph.json').read_text(encoding='utf-8')) for p in (left, right)]
-    for key in ('nodes', 'edges', 'transactions', 'clusters', 'top', 'config', 'output_sha256'):
+    for key in ('nodes', 'edges', 'transactions', 'clusters', 'top', 'config', 'output_sha256',
+                'components', 'motif_rankings', 'sensitivity_profiles', 'analysis_sha256'):
         if a[key] != b[key]:
             raise AssertionError(f'Snapshot content differs: {key}')
     return hashes

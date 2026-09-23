@@ -5,6 +5,9 @@ import math
 from pathlib import Path
 import networkx as nx
 import pandas as pd
+from .witnesses import build_witnesses
+from .observations import build_observations
+from .insights import role_sensitivity
 
 ROLES = ('consolidator', 'transit', 'distributor', 'terminal', 'coordinator', 'peripheral')
 PRECEDENCE = ('coordinator', 'distributor', 'consolidator', 'transit', 'terminal', 'peripheral')
@@ -31,8 +34,10 @@ def read_config(path=None):
         raise ValueError('Набор параметров config должен соответствовать config/roles.json')
     if cfg['centrality_mode'] not in ('exact', 'approximate'):
         raise ValueError('centrality_mode: ожидается exact или approximate')
+    if cfg['coordinator_require_bridge'] is not True:
+        raise ValueError('coordinator_require_bridge: требуется true; координатору нужен направленный путь')
     for key, value in cfg.items():
-        if key not in ('priority_weights', 'centrality_mode') and (not _finite_number(value) or value < 0):
+        if key not in ('priority_weights', 'centrality_mode', 'coordinator_require_bridge') and (not _finite_number(value) or value < 0):
             raise ValueError(f'Неверный параметр {key}')
     for key in ('max_depth', 'random_seed', 'betweenness_samples', 'consolidator_min_payers',
                 'consolidator_min_seeds', 'distributor_min_payees', 'coordinator_min_degree',
@@ -207,7 +212,8 @@ def classify(row, cfg, centrality_threshold):
         'coordinator': active >= cfg['coordinator_min_degree'] and row['betweenness'] > 0
             and row['betweenness'] >= centrality_threshold
             and row['other_clusters'] >= cfg['coordinator_min_other_clusters']
-            and row['seed_reach'] >= cfg['coordinator_min_seeds'],
+            and row['seed_reach'] >= cfg['coordinator_min_seeds']
+            and bool(row.get('bridge_evidence')),
         'distributor': row['out_deg'] >= cfg['distributor_min_payees']
             and row['out_deg'] >= cfg['distributor_fan_ratio'] * max(row['in_deg'], 1),
         'consolidator': row['in_deg'] >= cfg['consolidator_min_payers'] and row['seed_reach'] >= cfg['consolidator_min_seeds'],
@@ -232,7 +238,7 @@ def classify(row, cfg, centrality_threshold):
     if row['truncated_by_depth']:
         score = min(score, 0.6)
     snippets = {
-        'coordinator': f"Посредничество {row['betweenness']:.3g}; связи с {row['other_clusters']} другими кластерами; {row['seed_reach']} seed-путей",
+        'coordinator': f"Направленный путь между кластерами; посредничество {row['betweenness']:.3g}; {row['other_clusters']} чужих кластеров; {row['seed_reach']} seed-путей",
         'distributor': f"Веер: {row['out_deg']} получателей, {row['out_tx']} переводов; {row['in_deg']} плательщиков",
         'consolidator': f"Сбор: {row['in_deg']} плательщиков, {row['in_tx']} переводов; {row['seed_reach']} seed-путей",
         'transit': f"Пропуск {ratio:.3f}; ≤{cfg['transit_window_days']} дн.: {temporal_in:.1%} входа, {temporal_out:.1%} выхода; внутри дня порядок неизвестен" if reliable_ratio else '',
@@ -255,6 +261,12 @@ def percentile(series):
 def analyze(nodes, edges, tx, cfg):
     graph = build_graph(nodes, edges)
     frame = features(nodes, graph, tx, cfg)
+    witnesses = build_witnesses(graph, frame, tx, cfg)
+    observations = build_observations(graph, tx)
+    for key in ('bridge_evidence', 'temporal_evidence'):
+        frame[key] = [witnesses[int(gid)][key] for gid in frame.gid]
+    for key in ('motifs', 'observed_facts', 'motif_summary'):
+        frame[key] = [observations[int(gid)][key] for gid in frame.gid]
     active = frame.in_deg + frame.out_deg > 0
     centrality_threshold = float(frame.loc[active, 'betweenness'].quantile(cfg['coordinator_centrality_quantile'])) if active.any() else 0.0
     classified = [classify(row, cfg, centrality_threshold) for row in frame.to_dict('records')]
@@ -262,6 +274,21 @@ def analyze(nodes, edges, tx, cfg):
     reasons = [peripheral_reason(row) if row['role'] == 'peripheral' else ('', '')
                for row in frame.to_dict('records')]
     frame['peripheral_reason'], frame['peripheral_reason_text'] = zip(*reasons)
+    stability = role_sensitivity(frame, cfg)
+    frame['role_stability'] = [stability[int(gid)] for gid in frame.gid]
+    frame['limitations'] = [
+        ('Обрыв на depth=4: продолжение цепочки не наблюдается. ' if row.truncated_by_depth else '')
+        + ('Вход seed неполон. ' if row.is_seed else '')
+        + 'Роль — гипотеза по неполной выборке. Совместимость дат и сумм не доказывает движение тех же денег.'
+        for row in frame.itertuples()]
+    frame['next_query'] = [
+        'Запросить продолжение исходящих связей за четвёртым коленом.' if row.truncated_by_depth else
+        'Запросить полный входящий поток, включая межбанк и соседние периоды.' if row.is_seed else
+        'Уточнить время операций внутри дня и проверить указанные переводы.' if row.role == 'transit' else
+        'Проверить указанный путь и назначение переводов между участниками.' if row.role == 'coordinator' else
+        'Проверить операции наблюдаемого мотива и их назначение.' if row.motifs else
+        'Запросить операции соседних периодов и межбанковские переводы.'
+        for row in frame.itertuples()]
     components = pd.DataFrame(index=frame.index)
     components['seed_reach'] = (frame.seed_reach / 5).clip(0, 1)
     for name, values in [('flow', frame[['in_kzt', 'out_kzt']].max(axis=1)),

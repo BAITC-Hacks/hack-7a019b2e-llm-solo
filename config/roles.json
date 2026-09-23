@@ -13,6 +13,7 @@
   "transit_window_days": 2,
   "transit_min_matched_fraction": 0.8,
   "coordinator_min_degree": 4,
+  "coordinator_require_bridge": true,
   "coordinator_min_seeds": 3,
   "coordinator_min_other_clusters": 2,
   "coordinator_centrality_quantile": 0.9,

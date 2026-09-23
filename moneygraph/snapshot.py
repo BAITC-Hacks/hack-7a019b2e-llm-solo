@@ -4,7 +4,15 @@ import json
 
 
 SCHEMA_VERSION = 1
-RULE_VERSION = 'roles-v2-temporal-exact'
+RULE_VERSION = 'roles-v3-witnesses-motifs'
+
+
+def analysis_digest(snapshot):
+    """Bind explanatory facts and overview data, as well as the required CSVs."""
+    content = {key: snapshot[key] for key in
+               ('nodes', 'components', 'motif_rankings', 'sensitivity_profiles')}
+    return hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True,
+                         allow_nan=False, separators=(',', ':')).encode('utf-8')).hexdigest()
 
 
 def make_snapshot(payload, transactions, csvs):
@@ -20,12 +28,17 @@ def make_snapshot(payload, transactions, csvs):
                          date=row.date.date().isoformat(), sum_kzt=cents / 100, cents=cents))
     digests = {name: hashlib.sha256(content.encode('utf-8')).hexdigest()
                for name, content in csvs.items()}
+    details = dict(nodes=payload['nodes'], components=payload['components'],
+                   motif_rankings=payload['motif_rankings'],
+                   sensitivity_profiles=payload['sensitivity_profiles'])
+    detail_hash = analysis_digest(details)
     identity = dict(schema_version=SCHEMA_VERSION, rule_version=RULE_VERSION,
                     input_sha256=payload['summary']['input_sha256'],
-                    config=payload['config'], output_sha256=digests)
+                    config=payload['config'], output_sha256=digests, analysis_sha256=detail_hash)
     snapshot_id = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
                                             allow_nan=False, separators=(',', ':')).encode('utf-8')).hexdigest()
     return dict(schema_version=SCHEMA_VERSION, rule_version=RULE_VERSION,
-                snapshot_id=snapshot_id, nodes=payload['nodes'], edges=payload['edges'],
+                snapshot_id=snapshot_id, **details, edges=payload['edges'],
                 transactions=rows, clusters=payload['clusters'], top=payload['top'],
-                summary=payload['summary'], config=payload['config'], output_sha256=digests)
+                summary=payload['summary'], config=payload['config'], output_sha256=digests,
+                analysis_sha256=detail_hash)

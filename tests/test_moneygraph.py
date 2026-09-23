@@ -100,7 +100,10 @@ class AnalysisTests(unittest.TestCase):
                     other_clusters=0, betweenness=0., temporal_2d=1., active_days=3, depth=1)
         cases = [({}, 'transit'), ({'out_deg': 10, 'out_tx': 20}, 'distributor'),
                  ({'in_deg': 8, 'seed_reach': 3}, 'consolidator'),
-                 ({'in_deg': 4, 'other_clusters': 3, 'betweenness': .1, 'seed_reach': 4}, 'coordinator'),
+                 ({'in_deg': 4, 'other_clusters': 3, 'betweenness': .1, 'seed_reach': 4,
+                   'bridge_evidence': {'path': ['1', '2', '3']}}, 'coordinator'),
+                 ({'in_deg': 4, 'other_clusters': 3, 'betweenness': .1, 'seed_reach': 4,
+                   'bridge_evidence': None}, 'transit'),
                  ({'out_deg': 0, 'out_kzt': 0, 'pass_through': 0}, 'terminal'),
                  ({'is_seed': True}, 'peripheral'),
                  ({'truncated_by_depth': True, 'depth': 4, 'out_deg': 0}, 'peripheral')]

@@ -69,7 +69,8 @@ class SnapshotTests(unittest.TestCase):
             self.prepare(root, shuffled=True)
             run(root, root / 'b')
             a, b = [json.loads((root / child / 'graph.json').read_text(encoding='utf-8')) for child in ('a', 'b')]
-            for key in ('nodes', 'edges', 'transactions', 'clusters', 'top', 'output_sha256'):
+            for key in ('nodes', 'edges', 'transactions', 'clusters', 'top', 'output_sha256',
+                        'components', 'motif_rankings', 'sensitivity_profiles', 'analysis_sha256'):
                 self.assertEqual(a[key], b[key], key)
             # Input byte hashes may differ after a Parquet rewrite; derived data must not.
             for name in a['output_sha256']:

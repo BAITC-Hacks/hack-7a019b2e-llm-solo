@@ -111,6 +111,16 @@ class ExportAcceptanceTests(unittest.TestCase):
         self.assertEqual(result['n_isolates'], 5)
         self.assertEqual(result['n_transactions'], 0)
 
+    def test_fabricated_witness_rejected_even_when_metrics_copy_is_updated(self):
+        path = self.out / 'graph.json'
+        data = json.loads(path.read_text(encoding='utf-8'))
+        node = next(row for row in data['nodes'] if row['temporal_evidence']['matches'])
+        node['temporal_evidence']['matches'][0]['cents'] += 1
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        (self.out / 'metrics.json').write_text(json.dumps(data['nodes'], ensure_ascii=False), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'переводы-свидетели'):
+            verify(self.root, self.out)
+
 
 if __name__ == '__main__':
     unittest.main()
